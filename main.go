@@ -349,10 +349,12 @@ func setupTusUpload(app *fiber.App) {
 func main() {
 	// Parse command line arguments
 	var showVersion bool
+	var port string
 	flag.BoolVar(&showVersion, "version", false, "Show version information and exit")
 	flag.StringVar(&rootPath, "path", ".", "Root path to serve files from")
 	flag.StringVar(&libreOfficeAppPath, "libreoffice", "", "Path to LibreOffice AppImage executable (optional - enables office document viewing)")
 	flag.BoolVar(&writeMode, "write", false, "Enable write mode (allows file operations)")
+	flag.StringVar(&port, "port", "8080", "Port to listen on (default 8080)")
 	flag.Parse()
 
 	// Handle version flag
@@ -448,9 +450,9 @@ func main() {
 	app.Get("/files", websocket.New(handleWebSocket))
 
 	// Start server
-	log.Println("Server starting on :8080")
+	log.Printf("Server starting on :%s\n", port)
 	log.Println("Static files served from: ./static")
-	log.Fatal(app.Listen(":8080"))
+	log.Fatal(app.Listen(":" + port))
 }
 
 func handleImageStream(c *fiber.Ctx) error {
