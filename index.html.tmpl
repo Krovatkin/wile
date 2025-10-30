@@ -174,40 +174,32 @@
             }
         }
 
-        // Copy files operation
-        function copyFiles() {
+        // Helper function for clipboard operations (copy/cut)
+        function performClipboardOperation(toClearSet, toFillSet, operation, notificationType) {
             if (selected.size === 0) return;
 
-            // Clear cut files and add to copied files
-            cutFiles.clear();
-            copiedFiles = new Set(selected);
+            const count = selected.size;
 
-            console.log('Copied files:', Array.from(copiedFiles));
-            
-            // Clear selection
+            toClearSet.clear();
+            toFillSet.clear();
+            selected.forEach(item => toFillSet.add(item));
+
+            console.log(`${operation} files:`, Array.from(toFillSet));
+
             clearSelection();
             updateButtonStates();
 
-            // Show feedback
-            showNotification(`${copiedFiles.size} item${copiedFiles.size > 1 ? 's' : ''} copied`, 'success');
+            showNotification(`${count} item${count > 1 ? 's' : ''} ${operation}`, notificationType);
+        }
+
+        // Copy files operation
+        function copyFiles() {
+            performClipboardOperation(cutFiles, copiedFiles, 'copied', 'success');
         }
 
         // Cut files operation
         function cutSelectedFiles() {
-            if (selected.size === 0) return;
-
-            // Clear copied files and add to cut files
-            copiedFiles.clear();
-            cutFiles = new Set(selected);
-
-            console.log('Cut files:', Array.from(cutFiles));
-            
-            // Clear selection
-            clearSelection();
-            updateButtonStates();
-
-            // Show feedback
-            showNotification(`${cutFiles.size} item${cutFiles.size > 1 ? 's' : ''} cut`, 'warning');
+            performClipboardOperation(copiedFiles, cutFiles, 'cut', 'warning');
         }
 
         // Helper function to create file/folder item with delete button
