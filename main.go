@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -187,6 +188,8 @@ type WSMessage struct {
 type WSRequest struct {
 	Path      string `json:"path"`
 	RequestID int    `json:"requestId"`
+	SortBy    string `json:"sortBy"`
+	Dir       string `json:"dir"`
 }
 
 
@@ -677,10 +680,12 @@ func handleWebSocket(c *websocket.Conn) {
 
 		relativePath := req.Path
 		requestID := req.RequestID
-		log.Printf("WebSocket received path request: %s (ID: %d)", relativePath, requestID)
+		sortBy := req.SortBy
+		dir := req.Dir
+		log.Printf("WebSocket received path request: %s (ID: %d, Sort: %s %s)", relativePath, requestID, sortBy, dir)
 
 		// Get file listing for requested path
-		items := getDirectoryListing(relativePath)
+		items := getDirectoryListing(relativePath, sortBy, dir)
 
 		// Send items in chunks of 10, wrapped with requestId
 		chunkSize := 10
@@ -714,7 +719,7 @@ func handleWebSocket(c *websocket.Conn) {
 }
 
 // Extract directory listing logic into separate function
-func getDirectoryListing(relativePath string) []FileItem {
+func getDirectoryListing(relativePath, sortBy, dir string) []FileItem {
 
 	// Simply concatenate rootPath with relativePath
 	fullPath := filepath.Join(rootPath, relativePath)
@@ -738,10 +743,8 @@ func getDirectoryListing(relativePath string) []FileItem {
 		return []FileItem{}
 	}
 
-	// Convert to FileItems
+	// Convert to FileItems - separate folders from files
 	var folders []FileItem
-	var images []FileItem
-	var documents []FileItem
 	var files []FileItem
 
 	for _, entry := range entries {
@@ -778,22 +781,36 @@ func getDirectoryListing(relativePath string) []FileItem {
 			Modified: modTime,
 		}
 
-		switch fileType {
-		case "folder":
+		if fileType == "folder" {
 			folders = append(folders, item)
-		case "image":
-			images = append(images, item)
-		case "document":
-			documents = append(documents, item)
-		default:
+		} else {
 			files = append(files, item)
 		}
 	}
 
-	// Combine in order: folders, images, documents, then other files
-	allItems := append(folders, images...)
-	allItems = append(allItems, documents...)
-	allItems = append(allItems, files...)
+	// Sort function
+	sortItems := func(items []FileItem) {
+		sort.Slice(items, func(i, j int) bool {
+			var result bool
+			if sortBy == "modified" {
+				result = items[i].Modified.Before(items[j].Modified)
+			} else { // default to name sorting
+				result = strings.ToLower(items[i].Name) < strings.ToLower(items[j].Name)
+			}
+			// Reverse if descending
+			if dir == "desc" {
+				result = !result
+			}
+			return result
+		})
+	}
+
+	// Sort folders and files separately
+	sortItems(folders)
+	sortItems(files)
+
+	// Combine: folders first, then files
+	allItems := append(folders, files...)
 
 	return allItems
 }

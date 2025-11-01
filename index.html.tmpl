@@ -55,7 +55,25 @@
                 📁 <span id="currentPath">/</span>
             </div>
             <div class="px-4 pb-4 flex flex-col flex-1 overflow-hidden">
-                <ul class="menu bg-base-100 rounded-box p-2 overflow-y-auto flex-1" id="fileList">
+                <!-- Column Headers -->
+                <div class="bg-base-100 rounded-t-box px-4 py-2 border-b border-gray-200">
+                    <div class="grid grid-cols-[1fr_auto_auto] gap-2 items-center w-full">
+                        <button class="flex items-center gap-1 text-sm font-semibold text-gray-600 hover:text-gray-900 text-left" onclick="sortBy('name')">
+                            Name
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16V4m0 0L3 8m4-4l4 4m6 0v12m0 0l4-4m-4 4l-4-4"></path>
+                            </svg>
+                        </button>
+                        <button class="text-sm font-semibold text-gray-600 hover:text-gray-900 whitespace-nowrap" onclick="sortBy('modified')">
+                            Modified
+                            <svg class="w-4 h-4 inline-block" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16V4m0 0L3 8m4-4l4 4m6 0v12m0 0l4-4m-4 4l-4-4"></path>
+                            </svg>
+                        </button>
+                        <div style="width: 36px;"></div>
+                    </div>
+                </div>
+                <ul class="menu bg-base-100 rounded-b-box p-2 overflow-y-auto flex-1" id="fileList">
                     <!-- Content will be populated by WebSocket -->
                 </ul>
 
@@ -143,6 +161,8 @@
                 this.hasFolders = false;
                 this.hasFiles = false;
                 this.dividerAdded = false;
+                this.sortBy = 'name';  // Default sort column
+                this.sortDir = 'asc';   // Default sort direction
                 //this.selected = new Set();
             }
         }
@@ -345,6 +365,8 @@
                 state.hasFiles = hasFiles;
                 state.dividerAdded = dividerAdded;
                 state.selected = new Set(selected);
+                state.sortBy = currentSortBy;
+                state.sortDir = currentSortDir;
             }
         }
 
@@ -372,6 +394,8 @@
                 hasFiles = state.hasFiles;
                 dividerAdded = state.dividerAdded;
                 selected = new Set(); // Start with empty selection on tab switch
+                currentSortBy = state.sortBy;
+                currentSortDir = state.sortDir;
 
                 // Navigate to the folder
                 navigateToFolder(currentPath);
@@ -388,6 +412,8 @@
             newState.hasFiles = hasFiles;
             newState.dividerAdded = dividerAdded;
             newState.selected = new Set(); // New tabs start with empty selection
+            newState.sortBy = currentSortBy;
+            newState.sortDir = currentSortDir;
             // Note: don't copy ws, each tab needs its own connection
 
             tabStates.set(tabId, newState);
@@ -664,6 +690,8 @@
         let ws = null;
         let currentPath = '';
         let currentRequestId = 0; // Counter for request identification
+        let currentSortBy = 'name'; // Default sort column
+        let currentSortDir = 'asc'; // Default sort direction
         let hasFolders = false;
         let hasFiles = false;
         let dividerAdded = false;
@@ -831,8 +859,13 @@
             // Update URL parameter when navigating
             updateURLPath(path);
 
-            console.log('Requesting path:', path, 'ID:', currentRequestId);
-            ws.send(JSON.stringify({ path: path, requestId: currentRequestId }));
+            console.log('Requesting path:', path, 'ID:', currentRequestId, 'Sort:', currentSortBy, currentSortDir);
+            ws.send(JSON.stringify({
+                path: path,
+                requestId: currentRequestId,
+                sortBy: currentSortBy,
+                dir: currentSortDir
+            }));
         }
 
         // Navigate to folder - use the path from server response directly
@@ -860,6 +893,29 @@
             const parentPath = pathParts.join('/');
 
             navigateToFolder(parentPath);
+        }
+
+        // Sort files by column
+        function sortBy(column) {
+            console.log('Sort by:', column);
+
+            // If clicking same column, toggle direction
+            if (currentSortBy === column) {
+                currentSortDir = currentSortDir === 'asc' ? 'desc' : 'asc';
+            } else {
+                // New column, default to ascending
+                currentSortBy = column;
+                currentSortDir = 'asc';
+            }
+
+            console.log('New sort:', currentSortBy, currentSortDir);
+
+            // Request current path with new sort settings
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                requestPath(currentPath);
+            } else {
+                connectWebSocket(currentPath);
+            }
         }
 
         let uppy = null;
