@@ -143,6 +143,12 @@
             }
         }
 
+        // Helper to set button state
+        function setButtonState(button, enabled) {
+            button.disabled = !enabled;
+            button.classList.toggle('disabled:opacity-50', !enabled);
+        }
+
         // Update button states based on selection and clipboard
         function updateButtonStates() {
             const copyBtn = document.getElementById('copyBtn');
@@ -158,27 +164,11 @@
                 selectionCount.textContent = `${count} item${count > 1 ? 's' : ''} selected`;
             }
 
-            // Enable/disable copy and cut based on selection
-            if (selected.size > 0) {
-                copyBtn.disabled = false;
-                cutBtn.disabled = false;
-                copyBtn.classList.remove('disabled:opacity-50');
-                cutBtn.classList.remove('disabled:opacity-50');
-            } else {
-                copyBtn.disabled = true;
-                cutBtn.disabled = true;
-                copyBtn.classList.add('disabled:opacity-50');
-                cutBtn.classList.add('disabled:opacity-50');
-            }
-
-            // Enable/disable paste based on clipboard content
-            if (copiedFiles.size > 0 || cutFiles.size > 0) {
-                pasteBtn.disabled = false;
-                pasteBtn.classList.remove('disabled:opacity-50');
-            } else {
-                pasteBtn.disabled = true;
-                pasteBtn.classList.add('disabled:opacity-50');
-            }
+            // Enable/disable buttons based on state
+            const hasSelection = selected.size > 0;
+            setButtonState(copyBtn, hasSelection);
+            setButtonState(cutBtn, hasSelection);
+            setButtonState(pasteBtn, copiedFiles.size > 0 || cutFiles.size > 0);
         }
 
         // Helper function for clipboard operations (copy/cut)
@@ -540,52 +530,31 @@
                 // autoplayVideos: false
             });
 
+            // Extract common navigation handler
+            function createNavigationHandler(direction) {
+                return function(e) {
+                    e.preventDefault();
+                    const currentHref = lightbox.elements[0].href;
+                    const element = findImageElement(currentHref, direction);
+
+                    if (element) {
+                        lightbox.setElements([{
+                            href: element.getAttribute('href'),
+                            title: element.getAttribute('data-title'),
+                            description: element.getAttribute('data-description')
+                        }]);
+                        lightbox.goToSlide(0);
+                    }
+                };
+            }
+
             lightbox.on('open', function() {
                 const nextBtn = document.querySelector('.gnext');
                 const prevBtn = document.querySelector('.gprev');
-                
-                if (nextBtn) {
-                    nextBtn.onclick = function(e) {
-                        e.preventDefault();
-                        
-                        // Find next image element in DOM
-                        const currentHref = lightbox.elements[0].href;
-                        const nextElement = findImageElement(currentHref, 1); // +1 for next
-                        
-                        if (nextElement) {
-                            lightbox.setElements([
-                                {
-                                    href: nextElement.getAttribute('href'),
-                                    title: nextElement.getAttribute('data-title'),
-                                    description: nextElement.getAttribute('data-description')
-                                }
-                            ]);
-                            lightbox.goToSlide(0); // Go to the only image (index 0)
-                        }
-                    };
-                }
-                
-                if (prevBtn) {
-                    prevBtn.onclick = function(e) {
-                        e.preventDefault();
-                        
-                        // Find previous image element in DOM
-                        const currentHref = lightbox.elements[0].href;
-                        const prevElement = findImageElement(currentHref, -1); // -1 for previous
-                        
-                        if (prevElement) {
-                            lightbox.setElements([
-                                {
-                                    href: prevElement.href,
-                                    title: prevElement.getAttribute('data-title'),
-                                    description: prevElement.getAttribute('data-description')
-                                }
-                            ]);
-                            lightbox.goToSlide(0); // Go to the only image (index 0)
-                        }
-                    };
-                }
-            });       
+
+                if (nextBtn) nextBtn.onclick = createNavigationHandler(1);
+                if (prevBtn) prevBtn.onclick = createNavigationHandler(-1);
+            });
 
         }
 
@@ -919,11 +888,6 @@
                     btn.title = 'Read-only mode - use --write flag to enable file operations';
                 });
             }
-            // Add event listener for new tab button
-            document.getElementById('addTabBtn').addEventListener('click', addNewTab);
-
-            // Initialize button states
-            updateButtonStates();
 
             // Get initial path from URL parameter
             currentPath = getPathFromURL();
