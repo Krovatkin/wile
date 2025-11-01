@@ -663,6 +663,7 @@
         // Global variables (start with defaults)
         let ws = null;
         let currentPath = '';
+        let currentRequestId = 0; // Counter for request identification
         let hasFolders = false;
         let hasFiles = false;
         let dividerAdded = false;
@@ -721,8 +722,16 @@
         // Handle incoming WebSocket messages
         function handleMessage(event) {
             try {
-                const data = JSON.parse(event.data);
-                console.log('Received:', data);
+                const msg = JSON.parse(event.data);
+                console.log('Received:', msg);
+
+                // Check if message is for current request (ignore stale messages)
+                if (msg.requestId !== currentRequestId) {
+                    console.log(`Ignoring message for request ${msg.requestId} (current: ${currentRequestId})`);
+                    return;
+                }
+
+                const data = msg.items;
 
                 // If empty array, hide spinner and stop
                 if (Array.isArray(data) && data.length === 0) {
@@ -758,6 +767,7 @@
 
         // Connect to WebSocket
         function connectWebSocket(path) {
+            // Close existing connection if any
             if (ws) {
                 ws.close();
             }
@@ -776,12 +786,14 @@
 
             // Use current domain and port instead of hardcoded localhost
             const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-            const wsUrl = `${protocol}//${window.location.host}/files?path=${encodeURIComponent(path)}`;
+            const wsUrl = `${protocol}//${window.location.host}/files`;
 
             ws = new WebSocket(wsUrl);
 
             ws.onopen = function(event) {
-                console.log('WebSocket connected for path:', path);
+                console.log('WebSocket connected');
+                // Send path request
+                requestPath(path);
             };
 
             ws.onmessage = handleMessage;
@@ -797,10 +809,43 @@
             };
         }
 
+        // Request a path without reconnecting
+        function requestPath(path) {
+            if (!ws || ws.readyState !== WebSocket.OPEN) {
+                console.error('WebSocket not connected');
+                return;
+            }
+
+            clearFileList();
+            showSpinner();
+
+            // Increment request counter
+            currentRequestId++;
+
+            currentPath = path;
+            // Display path with leading slash for UI
+            const displayPath = rootPath + (path === '' ? '' : '/' + path);
+            currentPathElement.textContent = displayPath;
+            updateBackButton();
+
+            // Update URL parameter when navigating
+            updateURLPath(path);
+
+            console.log('Requesting path:', path, 'ID:', currentRequestId);
+            ws.send(JSON.stringify({ path: path, requestId: currentRequestId }));
+        }
+
         // Navigate to folder - use the path from server response directly
         function navigateToFolder(folderPath) {
             clearSelection(); // Clear selection when navigating
-            connectWebSocket(folderPath);
+
+            // If WebSocket is open, just request the new path
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                requestPath(folderPath);
+            } else {
+                // Otherwise reconnect
+                connectWebSocket(folderPath);
+            }
         }
 
         // Navigate back to parent directory
@@ -814,7 +859,7 @@
             pathParts.pop(); // Remove last part
             const parentPath = pathParts.join('/');
 
-            connectWebSocket(parentPath);
+            navigateToFolder(parentPath);
         }
 
         let uppy = null;

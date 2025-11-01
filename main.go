@@ -179,6 +179,17 @@ type FileItem struct {
 	Modified time.Time `json:"modified"`
 }
 
+type WSMessage struct {
+	RequestID int        `json:"requestId"`
+	Items     []FileItem `json:"items"`
+}
+
+type WSRequest struct {
+	Path      string `json:"path"`
+	RequestID int    `json:"requestId"`
+}
+
+
 func handleDocument(c *fiber.Ctx) error {
 	// Check if office docs are enabled
 	if libreOfficeAppPath == "" {
@@ -654,9 +665,56 @@ func getFileType(entry os.DirEntry) string {
 func handleWebSocket(c *websocket.Conn) {
 	defer c.Close()
 
-	// Get path from query parameters
-	relativePath := c.Query("path", "")
-	log.Printf("WebSocket connected for path: %s", relativePath)
+	log.Println("WebSocket connected")
+
+	// Listen for path requests from client
+	for {
+		var req WSRequest
+		if err := c.ReadJSON(&req); err != nil {
+			log.Printf("WebSocket read error: %v", err)
+			return
+		}
+
+		relativePath := req.Path
+		requestID := req.RequestID
+		log.Printf("WebSocket received path request: %s (ID: %d)", relativePath, requestID)
+
+		// Get file listing for requested path
+		items := getDirectoryListing(relativePath)
+
+		// Send items in chunks of 10, wrapped with requestId
+		chunkSize := 10
+		for i := 0; i < len(items); i += chunkSize {
+			end := min(i+chunkSize, len(items))
+			chunk := items[i:end]
+
+			msg := WSMessage{
+				RequestID: requestID,
+				Items:     chunk,
+			}
+
+			if err := c.WriteJSON(msg); err != nil {
+				log.Printf("Error sending chunk: %v", err)
+				return
+			}
+		}
+
+		// Send empty array wrapped with requestId to indicate completion
+		completionMsg := WSMessage{
+			RequestID: requestID,
+			Items:     []FileItem{},
+		}
+		if err := c.WriteJSON(completionMsg); err != nil {
+			log.Printf("Error sending completion signal: %v", err)
+			return
+		}
+
+		log.Printf("Finished sending files for path: %s (ID: %d)", relativePath, requestID)
+	}
+}
+
+// Extract directory listing logic into separate function
+func getDirectoryListing(relativePath string) []FileItem {
 
 	// Simply concatenate rootPath with relativePath
 	fullPath := filepath.Join(rootPath, relativePath)
@@ -665,22 +723,19 @@ func handleWebSocket(c *websocket.Conn) {
 	info, err := os.Stat(fullPath)
 	if err != nil {
 		log.Printf("Path does not exist: %s (error: %v)", fullPath, err)
-		c.WriteJSON([]FileItem{}) // Send empty array and close
-		return
+		return []FileItem{}
 	}
 
 	if !info.IsDir() {
 		log.Printf("Path is not a directory: %s", fullPath)
-		c.WriteJSON([]FileItem{}) // Send empty array and close
-		return
+		return []FileItem{}
 	}
 
 	// List directory contents
 	entries, err := os.ReadDir(fullPath)
 	if err != nil {
 		log.Printf("Error reading directory %s: %v", fullPath, err)
-		c.WriteJSON([]FileItem{}) // Send empty array and close
-		return
+		return []FileItem{}
 	}
 
 	// Convert to FileItems
@@ -740,23 +795,5 @@ func handleWebSocket(c *websocket.Conn) {
 	allItems = append(allItems, documents...)
 	allItems = append(allItems, files...)
 
-	// Send items in chunks of 10
-	chunkSize := 10
-	for i := 0; i < len(allItems); i += chunkSize {
-		end := min(i+chunkSize, len(allItems))
-		chunk := allItems[i:end]
-
-		// Send chunk
-		if err := c.WriteJSON(chunk); err != nil {
-			log.Printf("Error sending chunk: %v", err)
-			return
-		}
-	}
-
-	// Send empty array to indicate completion
-	if err := c.WriteJSON([]FileItem{}); err != nil {
-		log.Printf("Error sending completion signal: %v", err)
-	}
-
-	log.Printf("Finished sending files for path: %s", relativePath)
+	return allItems
 }
