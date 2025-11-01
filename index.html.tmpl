@@ -649,9 +649,10 @@
                     getFileIcon(name, 'document')
                 );
             } else {
+                const fileUrl = `/file?path=${encodeURIComponent(path)}`;
                 return createItemHTML(
                     item,
-                    `href="javascript:void(0)" ${commonAttrs} class="${baseClass}" onclick="toggleFileSelection(this);"`,
+                    `href="${fileUrl}" ${commonAttrs} class="${baseClass}" onclick="event.preventDefault(); toggleFileSelection(this);" ondblclick="event.stopPropagation(); window.location.href='${fileUrl}';"`,
                     getFileIcon(name, 'file')
                 );
             }
