@@ -50,12 +50,11 @@
         </div>
 
         <!-- File Browser Container -->
-        <div class="collapse collapse-arrow bg-blue-100 flex flex-col" style="height: calc(100vh - 200px);">
-            <input type="checkbox" checked />
-            <div class="collapse-title text-xl font-medium">
+        <div class="bg-blue-100 rounded-lg flex flex-col" style="height: calc(100vh - 200px);">
+            <div class="p-4 text-xl font-medium">
                 📁 <span id="currentPath">/</span>
             </div>
-            <div class="collapse-content flex flex-col flex-1 overflow-hidden">
+            <div class="px-4 pb-4 flex flex-col flex-1 overflow-hidden">
                 <ul class="menu bg-base-100 rounded-box p-2 overflow-y-auto flex-1" id="fileList">
                     <!-- Content will be populated by WebSocket -->
                 </ul>
