@@ -294,11 +294,35 @@ var (
 
 func setupTusUpload(app *fiber.App) {
 	if !writeMode {
+		log.Println("Upload disabled: not in write mode")
+		return
+	}
+
+	// Check uploads directory
+	uploadsDir := "./uploads"
+	info, err := os.Stat(uploadsDir)
+	if err == nil {
+		// Directory exists
+		if !info.IsDir() {
+			log.Printf("Error: %s exists but is not a directory", uploadsDir)
+			return
+		}
+		log.Printf("Uploads directory already exists: %s", uploadsDir)
+	} else if os.IsNotExist(err) {
+		// Directory doesn't exist, create it
+		if err := os.Mkdir(uploadsDir, 0755); err != nil {
+			log.Printf("Failed to create uploads directory: %s", err)
+			return
+		}
+		log.Printf("Created uploads directory: %s", uploadsDir)
+	} else {
+		// Other error (permission, etc.)
+		log.Printf("Failed to check uploads directory: %s", err)
 		return
 	}
 
 	// Create file store
-	store := filestore.New("./uploads")
+	store := filestore.New(uploadsDir)
 
 	// Create composer
 	composer := handler.NewStoreComposer()
@@ -317,6 +341,7 @@ func setupTusUpload(app *fiber.App) {
 		log.Printf("Unable to create TUS handler: %s", err)
 		return
 	}
+	log.Println("TUS upload handler initialized successfully")
 
 	// Handle completed uploads
 	go func() {
@@ -325,13 +350,15 @@ func setupTusUpload(app *fiber.App) {
 			targetPath := info.MetaData["relativePath"]
 			filename := info.MetaData["filename"]
 
-			tempFile := filepath.Join("./uploads", event.Upload.ID)
+			log.Printf("Upload completed - ID: %s, Filename: %s, TargetPath: %s", event.Upload.ID, filename, targetPath)
+
+			tempFile := filepath.Join(uploadsDir, event.Upload.ID)
 			finalPath := filepath.Join(rootPath, targetPath, filename)
-			log.Printf("Final path: %s", finalPath)
+			log.Printf("Moving from %s to %s", tempFile, finalPath)
+
 			os.MkdirAll(filepath.Dir(finalPath), 0755)
-			//os.Rename(tempFile, finalPath)
 			move(tempFile, finalPath)
-			log.Printf("Successfully moved %s to %s", tempFile, finalPath)
+			log.Printf("Successfully moved uploaded file to %s", finalPath)
 		}
 	}()
 

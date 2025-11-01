@@ -49,16 +49,21 @@
             <span id="selectionCount" class="text-sm text-gray-500">No items selected</span>
         </div>
 
-        <!-- Original Content (back button removed) -->
-        <div class="collapse collapse-arrow bg-blue-100">
+        <!-- File Browser Container -->
+        <div class="collapse collapse-arrow bg-blue-100 flex flex-col" style="height: calc(100vh - 200px);">
             <input type="checkbox" checked />
             <div class="collapse-title text-xl font-medium">
                 📁 <span id="currentPath">/</span>
             </div>
-            <div class="collapse-content">
-                <ul class="menu bg-base-100 rounded-box p-2" id="fileList">
+            <div class="collapse-content flex flex-col flex-1 overflow-hidden">
+                <ul class="menu bg-base-100 rounded-box p-2 overflow-y-auto flex-1" id="fileList">
                     <!-- Content will be populated by WebSocket -->
                 </ul>
+
+                <!-- Upload Dropzone -->
+                <div id="uploadDropzone" class="mt-2 border-2 border-dashed border-gray-300 rounded-lg bg-gray-50 flex items-center justify-center text-gray-500 text-sm" style="min-height: 48px; max-height: 48px;">
+                    Drop files here to upload
+                </div>
 
                 <div id="uploadProgress" class="mt-2"></div>
                 <!-- Loading Spinner -->
@@ -850,10 +855,17 @@
                 }
             });
 
-            const fileList = document.getElementById('fileList');
-            fileList.addEventListener('dragover', (e) => e.preventDefault());
-            fileList.addEventListener('drop', (e) => {
+            const dropzone = document.getElementById('uploadDropzone');
+            dropzone.addEventListener('dragover', (e) => {
                 e.preventDefault();
+                dropzone.classList.add('border-blue-400', 'bg-blue-50');
+            });
+            dropzone.addEventListener('dragleave', (e) => {
+                dropzone.classList.remove('border-blue-400', 'bg-blue-50');
+            });
+            dropzone.addEventListener('drop', (e) => {
+                e.preventDefault();
+                dropzone.classList.remove('border-blue-400', 'bg-blue-50');
                 Array.from(e.dataTransfer.files).forEach(file => {
                     uppy.addFile({ name: file.name, type: file.type, data: file });
                 });
@@ -867,6 +879,10 @@
 
             if (writeMode) {
                 initializeUpload();
+            } else {
+                // Hide dropzone in read-only mode
+                const dropzone = document.getElementById('uploadDropzone');
+                if (dropzone) dropzone.style.display = 'none';
             }
             
             
