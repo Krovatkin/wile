@@ -301,7 +301,7 @@ var (
 	libreOfficeAppPath string
 	writeMode          bool
 	// Version information - these will be set at build time
-	version   = "0.1.0-alpha" // Default version
+	version   = "0.2.0-alpha" // Default version
 	buildDate = "unknown"     // Will be set during build
 	gitCommit = "unknown"     // Will be set during build
 )
