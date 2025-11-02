@@ -301,7 +301,7 @@ var (
 	libreOfficeAppPath string
 	writeMode          bool
 	// Version information - these will be set at build time
-	version   = "0.2.0-alpha" // Default version
+	version   = "0.2.1-alpha" // Default version
 	buildDate = "unknown"     // Will be set during build
 	gitCommit = "unknown"     // Will be set during build
 )
@@ -461,11 +461,6 @@ func main() {
 
 		c.Set("Content-Type", "text/html")
 		return tmpl.Execute(c.Response().BodyWriter(), data)
-	})
-
-	// Serve the document viewer HTML file
-	app.Get("/doc_viewer", func(c *fiber.Ctx) error {
-		return c.SendFile("./doc_viewer.html")
 	})
 
 	// Image streaming route - now uses query parameter
