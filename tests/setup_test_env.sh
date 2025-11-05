@@ -23,6 +23,8 @@ echo "Creating folder structure..."
 mkdir -p tmp_test/folder1/subfolder1/deep1/deep2/deep3
 mkdir -p tmp_test/folder2/subfolder2
 mkdir -p tmp_test/folder3
+mkdir -p "tmp_test/folder with spaces"
+mkdir -p "tmp_test/folder with spaces/sub folder"
 
 echo "✓ Folders created"
 
@@ -38,6 +40,8 @@ echo "Another deep file" > tmp_test/folder2/subfolder2/another_deep.txt
 echo "Deep level 1" > tmp_test/folder1/subfolder1/deep1/file_deep1.txt
 echo "Deep level 2" > tmp_test/folder1/subfolder1/deep1/deep2/file_deep2.txt
 echo "Deep level 3" > tmp_test/folder1/subfolder1/deep1/deep2/deep3/file_deep3.txt
+echo "File with spaces content" > "tmp_test/folder with spaces/file with spaces.txt"
+echo "Another spaced file" > "tmp_test/folder with spaces/sub folder/nested file.txt"
 
 echo "✓ Text files created"
 

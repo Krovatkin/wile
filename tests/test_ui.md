@@ -821,6 +821,85 @@ function findImageElement(currentHref, direction) {
 
 ---
 
+## Folder Zip Download Test
+
+### Manual Test (Command Line)
+
+**Test folder with spaces in names:**
+
+```bash
+# Start server
+go build -o file-browser && ./file-browser -port 3000 -path tmp_test -write
+
+# Download folder with spaces
+curl -o test_spaces.zip "http://localhost:3000/zip?path=folder%20with%20spaces"
+
+# Verify contents
+unzip -l test_spaces.zip
+```
+
+### Expected Structure
+
+The test environment includes a folder with spaces to verify proper URL encoding and zip handling:
+
+```
+folder with spaces/
+├── file with spaces.txt
+└── sub folder/
+    └── nested file.txt
+```
+
+### Test Steps
+
+1. **Open browser to root folder**
+   - Navigate to `http://localhost:3000`
+   - Locate "folder with spaces"
+   - Verify folder displays correctly
+
+2. **Click download icon**
+   - Blue download icon appears before delete icon (folders only)
+   - Click download icon on "folder with spaces"
+   - Browser downloads `folder with spaces.zip`
+
+3. **Verify zip contents**
+   - Extract downloaded zip file
+   - Verify all files and folders with spaces are preserved:
+     - `file with spaces.txt`
+     - `sub folder/nested file.txt`
+
+4. **Test nested folder download**
+   - Navigate into "folder with spaces"
+   - Click download icon on "sub folder"
+   - Verify `sub folder.zip` downloads correctly
+
+### Expected Behavior
+
+**URL Encoding:**
+- Frontend: `encodeURIComponent()` converts spaces to `%20`
+- Backend: `url.QueryUnescape()` decodes path correctly
+- Zip filename: Uses folder name with spaces preserved
+
+**Zip Structure:**
+- All files and folders with spaces preserved
+- Nested structure maintained
+- File contents intact
+- Forward slashes used in zip paths
+
+**UI Elements:**
+- Download icon (blue) appears only on folders
+- Files show only delete icon (red)
+- Both icons wrapped in flex container
+
+### Test Result
+✅ Folder zip download with spaces working correctly
+- URL encoding/decoding: WORKING
+- Zip creation: WORKING
+- Spaces in folder names: WORKING
+- Spaces in file names: WORKING
+- Nested folders with spaces: WORKING
+
+---
+
 ## Test Suite Summary
 
 ### All Tests

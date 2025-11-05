@@ -1,9 +1,11 @@
 package main
 
 import (
+	"archive/zip"
 	"flag"
 	"fmt"
 	"html/template"
+	"io"
 	"io/ioutil"
 	"log"
 	"os"
@@ -469,6 +471,9 @@ func main() {
 	// File streaming route - now uses query parameter
 	app.Get("/file", handleFileStream)
 
+	// Zip download route - streams folder as zip
+	app.Get("/zip", handleZipDownload)
+
 	//
 	app.Get("/manage", handleManage)
 
@@ -580,6 +585,119 @@ func handleFileStream(c *fiber.Ctx) error {
 
 	// Stream the file
 	return c.SendFile(fullPath)
+}
+
+func handleZipDownload(c *fiber.Ctx) error {
+	// Get the path from query parameter
+	relativePath := c.Query("path")
+	if relativePath == "" {
+		return c.Status(400).SendString("Path parameter required")
+	}
+
+	// Explicitly URL decode the path
+	decodedPath, err := url.QueryUnescape(relativePath)
+	if err != nil {
+		log.Printf("Error decoding path: %v", err)
+		return c.Status(400).SendString("Invalid path encoding")
+	}
+
+	log.Printf("Zip download request for path: %s", decodedPath)
+
+	// Construct full path using decoded path
+	fullPath := filepath.Join(rootPath, decodedPath)
+
+	// Check if path exists
+	info, err := os.Stat(fullPath)
+	if err != nil {
+		log.Printf("Path does not exist: %s", fullPath)
+		return c.Status(404).SendString("Path not found")
+	}
+
+	// Check if it's a directory
+	if !info.IsDir() {
+		return c.Status(400).SendString("Path must be a directory")
+	}
+
+	// Set headers for zip download
+	zipName := filepath.Base(fullPath) + ".zip"
+	c.Set("Content-Type", "application/zip")
+	c.Set("Content-Disposition", "attachment; filename=\""+zipName+"\"")
+
+	// Create zip writer that writes directly to response
+	zipWriter := zip.NewWriter(c.Response().BodyWriter())
+	defer zipWriter.Close()
+
+	// Walk the directory and add files to zip
+	err = filepath.Walk(fullPath, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+
+		// Skip hidden files
+		if strings.HasPrefix(filepath.Base(path), ".") {
+			if info.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+
+		// Get relative path for zip entry
+		relPath, err := filepath.Rel(fullPath, path)
+		if err != nil {
+			return err
+		}
+
+		// Skip the root directory itself
+		if relPath == "." {
+			return nil
+		}
+
+		// Create zip header
+		header, err := zip.FileInfoHeader(info)
+		if err != nil {
+			return err
+		}
+
+		// Use forward slashes in zip paths
+		header.Name = filepath.ToSlash(relPath)
+
+		// Set compression method
+		if info.IsDir() {
+			header.Name += "/"
+		} else {
+			header.Method = zip.Deflate
+		}
+
+		// Write header
+		writer, err := zipWriter.CreateHeader(header)
+		if err != nil {
+			return err
+		}
+
+		// If it's a file, copy contents
+		if !info.IsDir() {
+			file, err := os.Open(path)
+			if err != nil {
+				return err
+			}
+			defer file.Close()
+
+			_, err = io.Copy(writer, file)
+			if err != nil {
+				return err
+			}
+		}
+
+		return nil
+	})
+
+	if err != nil {
+		log.Printf("Error creating zip: %v", err)
+		return c.Status(500).SendString("Failed to create zip archive")
+	}
+
+	log.Printf("Successfully created zip for: %s", decodedPath)
+	return nil
 }
 
 func isImageFile(ext string) bool {

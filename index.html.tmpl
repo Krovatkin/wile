@@ -103,6 +103,7 @@
             cut: '<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.828 14.828a4 4 0 01-5.656 0M9 10h1m4 0h1m-6-4h8a2 2 0 012 2v8a2 2 0 01-2 2H8a2 2 0 01-2-2V8a2 2 0 012-2z"></path></svg>',
             paste: '<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v10a2 2 0 002 2h8a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"></path></svg>',
             delete: '<svg class="w-4 h-4 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1-1H8a1 1 0 00-1 1v3M4 7h16"></path></svg>',
+            download: '<svg class="w-4 h-4 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path></svg>',
             image: '<svg class="w-5 h-5" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M4 3a2 2 0 00-2 2v10a2 2 0 002 2h12a2 2 0 002-2V5a2 2 0 00-2-2H4zm12 12H4l4-8 3 6 2-4 3 6z" clip-rule="evenodd"></path></svg>',
             document: '<svg class="w-5 h-5" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M4 4a2 2 0 012-2h4.586A2 2 0 0112 2.586L15.414 6A2 2 0 0116 7.414V16a2 2 0 01-2 2H6a2 2 0 01-2-2V4z" clip-rule="evenodd"></path><path d="M8 8a1 1 0 011-1h2a1 1 0 110 2H9a1 1 0 01-1-1zm0 4a1 1 0 011-1h6a1 1 0 110 2H9a1 1 0 01-1-1z"></path></svg>',
             file: '<svg class="w-5 h-5" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M4 4a2 2 0 012-2h4.586A2 2 0 0112 2.586L15.414 6A2 2 0 0116 7.414V16a2 2 0 01-2 2H6a2 2 0 01-2-2V4zm2 6a1 1 0 011-1h6a1 1 0 110 2H7a1 1 0 01-1-1zm1 3a1 1 0 100 2h6a1 1 0 100-2H7z" clip-rule="evenodd"></path></svg>',
@@ -226,7 +227,7 @@
         // Helper function to create file/folder item with delete button
         function createItemHTML(entryObj, attributes, icon) {
             const { name, path, type, modified } = entryObj;
-            
+
             // Format the modified date to dd/mm/yy using Intl.DateTimeFormat
             const formatDate = (dateString) => {
                 const date = new Date(dateString);
@@ -237,9 +238,18 @@
                 });
                 return formatter.format(date);
             };
-            
+
             const formattedDate = formatDate(modified);
-            
+
+            // Download button (only for folders)
+            const downloadButton = type === 'folder' ? `
+                <button onclick="downloadFolder('${path.replace(/'/g, "\\'")}', event)"
+                        class="p-1 hover:bg-blue-100 rounded"
+                        title="Download folder as ZIP">
+                    ${ICONS.download}
+                </button>
+            ` : '';
+
             const deleteButton = `
                 <button onclick="deleteItem('${path.replace(/'/g, "\\'")}', event)"
                         class="delete-btn p-1 hover:bg-red-100 rounded"
@@ -258,7 +268,10 @@
                         <div class="text-sm text-gray-500 whitespace-nowrap">
                             ${formattedDate}
                         </div>
-                        ${deleteButton}
+                        <div class="flex gap-1">
+                            ${downloadButton}
+                            ${deleteButton}
+                        </div>
                     </div>
                 </li>
             `;
@@ -307,6 +320,17 @@
             });
         }
 
+
+        // Download folder as ZIP
+        function downloadFolder(folderPath, event) {
+            event.stopPropagation(); // Prevent navigation when clicking download
+
+            // Encode the path for URL
+            const encodedPath = encodeURIComponent(folderPath);
+
+            // Trigger download by navigating to zip endpoint
+            window.location.href = `/zip?path=${encodedPath}`;
+        }
 
         // Delete file/folder operation
         function deleteItem(itemPath, event) {
