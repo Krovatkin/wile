@@ -474,6 +474,9 @@ func main() {
 	// Zip download route - streams folder as zip
 	app.Get("/zip", handleZipDownload)
 
+	// Rename route - renames file or folder
+	app.Post("/rename", handleRename)
+
 	//
 	app.Get("/manage", handleManage)
 
@@ -698,6 +701,78 @@ func handleZipDownload(c *fiber.Ctx) error {
 
 	log.Printf("Successfully created zip for: %s", decodedPath)
 	return nil
+}
+
+func handleRename(c *fiber.Ctx) error {
+	// Parse JSON body
+	var req struct {
+		Path    string `json:"path"`
+		NewName string `json:"newName"`
+	}
+
+	if err := c.BodyParser(&req); err != nil {
+		return c.Status(400).JSON(fiber.Map{
+			"status": "error",
+			"error":  "Invalid request body",
+		})
+	}
+
+	// Validate inputs
+	if req.Path == "" || req.NewName == "" {
+		return c.Status(400).JSON(fiber.Map{
+			"status": "error",
+			"error":  "Path and newName are required",
+		})
+	}
+
+	// Ensure newName doesn't contain path separators
+	if strings.Contains(req.NewName, "/") || strings.Contains(req.NewName, "\\") {
+		return c.Status(400).JSON(fiber.Map{
+			"status": "error",
+			"error":  "New name cannot contain path separators",
+		})
+	}
+
+	// Build old and new paths
+	oldPath := filepath.Join(rootPath, req.Path)
+	dirPath := filepath.Dir(oldPath)
+	newPath := filepath.Join(dirPath, req.NewName)
+
+	// Check if old path exists
+	if _, err := os.Stat(oldPath); err != nil {
+		return c.Status(404).JSON(fiber.Map{
+			"status": "error",
+			"error":  "File or folder not found",
+		})
+	}
+
+	// Check if new path already exists
+	if _, err := os.Stat(newPath); err == nil {
+		return c.Status(400).JSON(fiber.Map{
+			"status": "error",
+			"error":  "A file or folder with that name already exists",
+		})
+	}
+
+	// Perform rename
+	if err := os.Rename(oldPath, newPath); err != nil {
+		log.Printf("Error renaming %s to %s: %v", oldPath, newPath, err)
+		return c.Status(500).JSON(fiber.Map{
+			"status": "error",
+			"error":  fmt.Sprintf("Failed to rename: %v", err),
+		})
+	}
+
+	log.Printf("Renamed: %s -> %s", req.Path, req.NewName)
+
+	// Return new path relative to root
+	newRelativePath := filepath.Join(filepath.Dir(req.Path), req.NewName)
+
+	return c.JSON(fiber.Map{
+		"status":  "success",
+		"newPath": newRelativePath,
+		"newName": req.NewName,
+	})
 }
 
 func isImageFile(ext string) bool {

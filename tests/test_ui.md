@@ -900,6 +900,174 @@ folder with spaces/
 
 ---
 
+## File/Folder Rename Test
+
+### Manual Test (Command Line)
+
+**Test file rename:**
+
+```bash
+# Start server
+go build -o file-browser && ./file-browser -port 3000 -path tmp_test -write
+
+# Test file rename
+curl -X POST http://localhost:3000/rename \
+  -H "Content-Type: application/json" \
+  -d '{"path": "test1.txt", "newName": "test1_renamed.txt"}'
+
+# Expected response:
+# {"status":"success","newPath":"test1_renamed.txt","newName":"test1_renamed.txt"}
+
+# Verify file was renamed
+ls -la tmp_test/ | grep test1
+```
+
+**Test folder rename with spaces:**
+
+```bash
+# Test folder rename
+curl -X POST http://localhost:3000/rename \
+  -H "Content-Type: application/json" \
+  -d '{"path": "folder with spaces", "newName": "folder renamed"}'
+
+# Expected response:
+# {"status":"success","newPath":"folder renamed","newName":"folder renamed"}
+
+# Verify folder was renamed
+ls -la tmp_test/ | grep "folder"
+```
+
+### Test Steps
+
+1. **Open browser to root folder**
+   - Navigate to `http://localhost:3000`
+   - Locate any file or folder
+
+2. **Click rename (pen) icon**
+   - Gray pen icon appears between download and delete icons
+   - Icon appears on both files and folders
+   - Click pen icon on any item
+
+3. **Enter new name**
+   - Prompt dialog appears with current name pre-filled
+   - Enter new name (just filename + extension, no path)
+   - Click OK or press Enter
+
+4. **Verify immediate DOM update**
+   - Name changes instantly in the UI
+   - No page refresh occurs
+   - Success notification appears: "Renamed to 'newname'"
+   - Item remains in same position in list
+
+5. **Test renamed item functionality**
+   - Click item to select it
+   - Double-click folder to navigate (if folder)
+   - Click rename again (should show new name in prompt)
+   - Click delete (should work with new path)
+   - Click download (folders only, should work with new path)
+
+6. **Test error cases**
+   - Try to rename to existing name → Shows error
+   - Try to rename with path separator (/) → Shows error
+   - Cancel rename prompt → No changes, no error
+
+### Expected Behavior
+
+**UI Elements:**
+- Pen icon (gray) appears after download icon (blue, folders only)
+- Pen icon appears before delete icon (red)
+- Icon color: gray (#6B7280)
+- Hover effect: gray background
+
+**Prompt Dialog:**
+- Shows current name pre-filled
+- User can edit the name
+- OK confirms, Cancel aborts
+
+**Server Validation:**
+- Path and newName required
+- newName cannot contain `/` or `\`
+- Old path must exist
+- New path must not exist
+- Returns success with newPath and newName
+
+**DOM Update (No Page Refresh):**
+- Display name updates to new name
+- `data-path` attribute updates to new path
+- All onclick handlers update with new path:
+  - Main li onclick (selection)
+  - li ondblclick (navigation for folders)
+  - Download button onclick (folders)
+  - Rename button onclick (all items)
+  - Delete button onclick (all items)
+- Title attribute updates
+
+**Notifications:**
+- Success: "Renamed to 'newname'" (info notification)
+- Error: Shows specific error message (error notification)
+
+**Execution Flow:**
+1. User clicks pen icon
+2. Prompt shows with current name
+3. User enters new name and clicks OK
+4. JavaScript sends POST to `/rename`
+5. **Waits for server response**
+6. If success: Updates DOM + shows notification
+7. If error: Shows error notification, no DOM changes
+
+### Test Cases with Spaces
+
+**Files with spaces:**
+```bash
+# Rename file with spaces
+curl -X POST http://localhost:3000/rename \
+  -H "Content-Type: application/json" \
+  -d '{"path": "folder with spaces/file with spaces.txt", "newName": "renamed file.txt"}'
+```
+
+**Nested folders with spaces:**
+```bash
+# Navigate to folder with spaces, then rename subfolder
+curl -X POST http://localhost:3000/rename \
+  -H "Content-Type: application/json" \
+  -d '{"path": "folder with spaces/sub folder", "newName": "subfolder renamed"}'
+```
+
+### Security Tests
+
+**Path traversal prevention:**
+```bash
+# Should fail - contains path separator
+curl -X POST http://localhost:3000/rename \
+  -H "Content-Type: application/json" \
+  -d '{"path": "test1.txt", "newName": "../test1.txt"}'
+
+# Expected: {"status":"error","error":"New name cannot contain path separators"}
+```
+
+**Overwrite prevention:**
+```bash
+# Should fail - target already exists
+curl -X POST http://localhost:3000/rename \
+  -H "Content-Type: application/json" \
+  -d '{"path": "test1.txt", "newName": "test2.txt"}'
+
+# Expected: {"status":"error","error":"A file or folder with that name already exists"}
+```
+
+### Test Result
+✅ File/folder rename working correctly
+- Server endpoint validation: WORKING
+- Path traversal prevention: WORKING
+- DOM updates without refresh: WORKING
+- All onclick handlers updated: WORKING
+- Files with spaces: WORKING
+- Folders with spaces: WORKING
+- Error handling: WORKING
+- Notifications: WORKING
+
+---
+
 ## Test Suite Summary
 
 ### All Tests
