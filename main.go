@@ -393,10 +393,12 @@ func main() {
 	// Parse command line arguments
 	var showVersion bool
 	var port string
+	var useReact bool
 	flag.BoolVar(&showVersion, "version", false, "Show version information and exit")
 	flag.StringVar(&rootPath, "path", ".", "Root path to serve files from")
 	flag.StringVar(&libreOfficeAppPath, "libreoffice", "", "Path to LibreOffice AppImage executable (optional - enables office document viewing)")
 	flag.BoolVar(&writeMode, "write", false, "Enable write mode (allows file operations)")
+	flag.BoolVar(&useReact, "react", false, "Use React version (serves static/react/index.html)")
 	flag.StringVar(&port, "port", "8080", "Port to listen on (default 8080)")
 	flag.Parse()
 
@@ -446,11 +448,20 @@ func main() {
 	// Serve static files from ./static directory
 	app.Static("/static", "./static")
 
+	// Serve React build assets
+	app.Static("/assets", "./static/react/assets")
+
 	// Your existing server setup code here...
 	app.Get("/doc_viewer", handleDocument)
 
 	// Serve the main HTML file at root
 	app.Get("/", func(c *fiber.Ctx) error {
+		if useReact {
+			// Serve React build
+			return c.SendFile("./static/react/index.html")
+		}
+
+		// Serve template version
 		tmpl, err := template.ParseFiles("./index.html.tmpl")
 		if err != nil {
 			return c.Status(500).SendString("Template error: " + err.Error())
