@@ -2,20 +2,23 @@ package main
 
 import (
 	"archive/zip"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"html/template"
 	"io"
 	"io/ioutil"
 	"log"
+	"net/url"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
+	"syscall"
 	"time"
-
-	"net/url"
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/fiber/v2/middleware/adaptor"
@@ -24,6 +27,8 @@ import (
 	"github.com/otiai10/copy"
 	"github.com/tus/tusd/pkg/filestore"
 	"github.com/tus/tusd/pkg/handler"
+
+	"file-browser/scan"
 )
 
 func move(src, dst string) error {
@@ -47,7 +52,53 @@ type IndexData struct {
 	RootPath  string
 }
 
+// ModificationLogEntry represents a single file operation logged to JSONL
+type ModificationLogEntry struct {
+	Timestamp string   `json:"timestamp"`
+	Action    string   `json:"action"`     // delete, copy, paste
+	Sources   []string `json:"sources"`    // source file paths
+	Dest      string   `json:"dest,omitempty"` // destination (empty for delete)
+	Errors    []string `json:"errors,omitempty"` // errors if any
+}
+
+// logModification appends a file operation to modifications.jsonl
+// NEVER overwrites the file, only appends
+func logModification(action string, sources []string, dest string, errors []string) {
+	logFilePath := filepath.Join(rootPath, "modifications.jsonl")
+
+	// Open file with append mode - creates if doesn't exist, never overwrites
+	f, err := os.OpenFile(logFilePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		log.Printf("Failed to open modification log: %v", err)
+		return
+	}
+	defer f.Close()
+
+	entry := ModificationLogEntry{
+		Timestamp: time.Now().Format(time.RFC3339),
+		Action:    action,
+		Sources:   sources,
+		Dest:      dest,
+		Errors:    errors,
+	}
+
+	data, err := json.Marshal(entry)
+	if err != nil {
+		log.Printf("Failed to marshal log entry: %v", err)
+		return
+	}
+
+	// Write JSON + newline
+	if _, err := f.Write(append(data, '\n')); err != nil {
+		log.Printf("Failed to write log entry: %v", err)
+	}
+}
+
 func handleManage(c *fiber.Ctx) error {
+	// Track this operation for graceful shutdown
+	fileOpsInProgress.Add(1)
+	defer fileOpsInProgress.Done()
+
 	// Add this check at the beginning
 	if !writeMode {
 		return c.Status(403).JSON(fiber.Map{
@@ -125,9 +176,31 @@ func handleManage(c *fiber.Ctx) error {
 		if action == "delete" {
 			// Handle delete operation
 			log.Printf("Would DELETE: %s", srcPath)
+
+			// Get node and size BEFORE deleting from filesystem
+			var nodeToDelete *scan.FileData
+			var sizeToSubtract int64
+			if withSizes && sizeTreeRoot != nil {
+				sizeTreeMutex.RLock()
+				nodeToDelete = sizeTreeRoot.FindByPath(srcPath)
+				if nodeToDelete != nil {
+					sizeToSubtract = nodeToDelete.Size()
+				}
+				sizeTreeMutex.RUnlock()
+			}
+
+			// Delete from filesystem (no lock held during I/O)
 			err = os.RemoveAll(srcPath) // RemoveAll works for both files and directories
 			if err != nil {
 				errors = append(errors, fmt.Sprintf("Failed to delete %s: %v", src, err))
+			} else if nodeToDelete != nil {
+				// Update size tree after successful delete
+				sizeTreeMutex.Lock()
+				nodeToDelete.UpdateParentSizes(-sizeToSubtract) // Subtract from parent chain
+				if nodeToDelete.Parent != nil {
+					nodeToDelete.Parent.RemoveChild(nodeToDelete)
+				}
+				sizeTreeMutex.Unlock()
 			}
 		} else {
 			// Handle copy/paste operations (existing code)
@@ -158,9 +231,69 @@ func handleManage(c *fiber.Ctx) error {
 
 			if err != nil {
 				errors = append(errors, fmt.Sprintf("Failed to %s %s to %s: %v", action, src, dest, err))
+			} else if withSizes && sizeTreeRoot != nil {
+				// Update size tree after successful operation
+				// IMPORTANT: Must hold lock during size calculation to prevent races
+				sizeTreeMutex.Lock()
+				if action == "copy" {
+					// For copy, add size to new parent chain
+					newInfo, statErr := os.Stat(targetPath)
+					if statErr == nil {
+						isDir := newInfo.IsDir()
+						var sizeToAdd int64
+						if isDir {
+							// For directories, walk and calculate total size
+							// Lock is held during this - necessary to prevent size from
+							// changing between calculation and tree update
+							filepath.Walk(targetPath, func(_ string, fi os.FileInfo, _ error) error {
+								if fi != nil && !fi.IsDir() {
+									sizeToAdd += fi.Size()
+								}
+								return nil
+							})
+						} else {
+							sizeToAdd = newInfo.Size()
+						}
+
+						// Add to new parent
+						parentPath := filepath.Dir(targetPath)
+						if parent := sizeTreeRoot.FindByPath(parentPath); parent != nil {
+							parent.UpdateParentSizes(sizeToAdd)
+						}
+					}
+				} else { // paste (move)
+					// For move, subtract from old parent and add to new parent
+					if oldNode := sizeTreeRoot.FindByPath(srcPath); oldNode != nil {
+						size := oldNode.Size()
+
+						// Remove from old location
+						oldNode.UpdateParentSizes(-size)
+						if oldNode.Parent != nil {
+							oldNode.Parent.RemoveChild(oldNode)
+						}
+
+						// Add to new location
+						newParentPath := filepath.Dir(targetPath)
+						if newParent := sizeTreeRoot.FindByPath(newParentPath); newParent != nil {
+							oldNode.Parent = newParent
+							newParent.Children = append(newParent.Children, oldNode)
+							oldNode.UpdateParentSizes(size)
+							// Update the Info with new stat
+							newInfo, statErr := os.Stat(targetPath)
+							if statErr == nil {
+								oldNode.Info = newInfo
+								oldNode.Dir = targetPath
+							}
+						}
+					}
+				}
+				sizeTreeMutex.Unlock()
 			}
 		}
 	}
+
+	// Log the operation to modifications.jsonl
+	logModification(action, srcList, dest, errors)
 
 	// Return response
 	if len(errors) > 0 {
@@ -176,10 +309,11 @@ func handleManage(c *fiber.Ctx) error {
 }
 
 type FileItem struct {
-	Type     string    `json:"type"`
-	Name     string    `json:"name"`
-	Path     string    `json:"path"`
-	Modified time.Time `json:"modified"`
+	Name      string `json:"name"`
+	Path      string `json:"path"`      // Relative path for navigation/actions
+	IsDir     bool   `json:"isDir"`     // Whether this is a directory
+	Size      int64  `json:"size"`      // -1 when --with-sizes not used
+	SizeStale bool   `json:"sizeStale"` // True if size data may be invalid
 }
 
 type WSMessage struct {
@@ -302,6 +436,12 @@ var (
 	rootPath           string
 	libreOfficeAppPath string
 	writeMode          bool
+	withSizes          bool
+	sizesFrom          string
+	sizesTo            string
+	sizeTreeRoot       *scan.FileData // Root of the size tree, walk from here
+	sizeTreeMutex      sync.RWMutex   // Protects sizeTreeRoot from concurrent access
+	fileOpsInProgress  sync.WaitGroup // Tracks in-flight file operations
 	// Version information - these will be set at build time
 	version   = "0.2.1-alpha" // Default version
 	buildDate = "unknown"     // Will be set during build
@@ -389,6 +529,67 @@ func setupTusUpload(app *fiber.App) {
 	group.Delete(":id", adaptor.HTTPHandlerFunc(tusHandler.DelFile))
 }
 
+// loadSizeTree loads the size tree from a JSON file
+func loadSizeTree(filename string) error {
+	data, err := os.ReadFile(filename)
+	if err != nil {
+		return fmt.Errorf("failed to read file: %w", err)
+	}
+
+	sizeTreeRoot = &scan.FileData{}
+	err = json.Unmarshal(data, sizeTreeRoot)
+	if err != nil {
+		return fmt.Errorf("failed to unmarshal JSON: %w", err)
+	}
+
+	// Rebuild parent pointers after deserialization
+	sizeTreeRoot.RebuildParentPointers(nil)
+
+	return nil
+}
+
+// saveSizeTree saves the size tree to a JSON file
+func saveSizeTree(filename string) error {
+	// Acquire read lock to prevent modifications during save
+	sizeTreeMutex.RLock()
+	defer sizeTreeMutex.RUnlock()
+
+	if sizeTreeRoot == nil {
+		return fmt.Errorf("size tree is not initialized")
+	}
+
+	data, err := json.MarshalIndent(sizeTreeRoot, "", "  ")
+	if err != nil {
+		return fmt.Errorf("failed to marshal JSON: %w", err)
+	}
+
+	err = os.WriteFile(filename, data, 0644)
+	if err != nil {
+		return fmt.Errorf("failed to write file: %w", err)
+	}
+
+	return nil
+}
+
+// buildSizeTree scans the directory tree and builds the size tree
+func buildSizeTree(rootPath string) error {
+	// Scan the directory tree
+	children, err := scan.ScanDirConcurrent(rootPath, 0)
+	if err != nil {
+		return err
+	}
+
+	// Create root node with children
+	sizeTreeRoot = &scan.FileData{}
+	sizeTreeRoot.Children = children
+
+	// Compute all sizes eagerly by calling Size() on root
+	// This recursively computes and caches sizes for all nodes
+	sizeTreeRoot.Size()
+
+	return nil
+}
+
 func main() {
 	// Parse command line arguments
 	var showVersion bool
@@ -397,8 +598,16 @@ func main() {
 	flag.StringVar(&rootPath, "path", ".", "Root path to serve files from")
 	flag.StringVar(&libreOfficeAppPath, "libreoffice", "", "Path to LibreOffice AppImage executable (optional - enables office document viewing)")
 	flag.BoolVar(&writeMode, "write", false, "Enable write mode (allows file operations)")
+	flag.BoolVar(&withSizes, "with-sizes", false, "Compute and display cumulative directory sizes")
+	flag.StringVar(&sizesFrom, "sizes-from", "", "Load size tree from JSON file (default: sizes.json if flag provided without value)")
+	flag.StringVar(&sizesTo, "sizes-to", "sizes.json", "Save size tree to JSON file on exit (default: sizes.json)")
 	flag.StringVar(&port, "port", "8080", "Port to listen on (default 8080)")
 	flag.Parse()
+
+	// Validate mutually exclusive flags
+	if withSizes && sizesFrom != "" {
+		log.Fatal("Error: --with-sizes and --sizes-from are mutually exclusive")
+	}
 
 	// Handle version flag
 	if showVersion {
@@ -431,6 +640,31 @@ func main() {
 	rootPath = absPath
 
 	log.Printf("Serving files from: %s", rootPath)
+
+	// Load or compute sizes
+	if sizesFrom != "" {
+		// Load sizes from JSON
+		if sizesFrom == "sizes.json" || sizesFrom == "" {
+			sizesFrom = filepath.Join(rootPath, "sizes.json")
+		}
+		log.Printf("Loading size tree from: %s", sizesFrom)
+		err := loadSizeTree(sizesFrom)
+		if err != nil {
+			log.Fatalf("Failed to load size tree: %v", err)
+		}
+		log.Println("Size tree loaded successfully")
+		withSizes = true // Enable size display
+	} else if withSizes {
+		// Compute sizes from scratch
+		log.Println("Computing directory sizes...")
+		err := buildSizeTree(rootPath)
+		if err != nil {
+			log.Printf("Warning: Failed to compute sizes: %v", err)
+			withSizes = false
+		} else {
+			log.Println("Directory size computation complete")
+		}
+	}
 
 	// Create Fiber app
 	app := fiber.New(fiber.Config{
@@ -493,10 +727,49 @@ func main() {
 	// WebSocket handler
 	app.Get("/files", websocket.New(handleWebSocket))
 
-	// Start server
-	log.Printf("Server starting on :%s\n", port)
-	log.Println("Static files served from: ./static")
-	log.Fatal(app.Listen(":" + port))
+	// Setup signal handler for graceful shutdown
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
+
+	// Start server in goroutine
+	go func() {
+		log.Printf("Server starting on :%s\n", port)
+		log.Println("Static files served from: ./static")
+		if err := app.Listen(":" + port); err != nil {
+			log.Printf("Server error: %v", err)
+		}
+	}()
+
+	// Block on signal channel
+	<-sigChan
+	log.Println("\nReceived interrupt signal, waiting for in-progress operations...")
+
+	// Wait for all file operations to complete
+	fileOpsInProgress.Wait()
+	log.Println("All file operations completed")
+
+	// Save size tree if it exists and either --with-sizes or --sizes-from was used
+	if sizeTreeRoot != nil && withSizes {
+		saveFile := sizesTo
+		if saveFile == "" {
+			saveFile = "sizes.json"
+		}
+		// If it's a relative path, make it relative to rootPath
+		if !filepath.IsAbs(saveFile) {
+			saveFile = filepath.Join(rootPath, saveFile)
+		}
+
+		log.Printf("Saving size tree to: %s", saveFile)
+		err := saveSizeTree(saveFile)
+		if err != nil {
+			log.Printf("Error saving size tree: %v", err)
+		} else {
+			log.Println("Size tree saved successfully")
+		}
+	}
+
+	log.Println("Shutting down...")
+	os.Exit(0)
 }
 
 func handleImageStream(c *fiber.Ctx) error {
@@ -704,6 +977,10 @@ func handleZipDownload(c *fiber.Ctx) error {
 }
 
 func handleRename(c *fiber.Ctx) error {
+	// Track this operation for graceful shutdown
+	fileOpsInProgress.Add(1)
+	defer fileOpsInProgress.Done()
+
 	// Parse JSON body
 	var req struct {
 		Path    string `json:"path"`
@@ -761,6 +1038,21 @@ func handleRename(c *fiber.Ctx) error {
 			"status": "error",
 			"error":  fmt.Sprintf("Failed to rename: %v", err),
 		})
+	}
+
+	// Update size tree after successful rename
+	if withSizes && sizeTreeRoot != nil {
+		sizeTreeMutex.Lock()
+		if node := sizeTreeRoot.FindByPath(oldPath); node != nil {
+			// Update the Info with new stat
+			newInfo, err := os.Stat(newPath)
+			if err == nil {
+				node.Info = newInfo
+				// Update Dir field with new path
+				node.Dir = newPath
+			}
+		}
+		sizeTreeMutex.Unlock()
 	}
 
 	log.Printf("Renamed: %s -> %s", req.Path, req.NewName)
@@ -941,7 +1233,7 @@ func getDirectoryListing(relativePath, sortBy, dir string) []FileItem {
 			continue
 		}
 
-		// Create relative path for the item by appending entry name to current relative path
+		// Create relative path for the item
 		var itemRelativePath string
 		if relativePath == "" {
 			itemRelativePath = entry.Name()
@@ -951,25 +1243,32 @@ func getDirectoryListing(relativePath, sortBy, dir string) []FileItem {
 		// Normalize path separators for web
 		itemRelativePath = filepath.ToSlash(itemRelativePath)
 
-		// Get file info to access modification time, use Unix epoch as default
-		var modTime time.Time
-		entryInfo, err := entry.Info()
-		if err != nil {
-			log.Printf("Error getting info for entry %s: %v", entry.Name(), err)
-			modTime = time.Unix(0, 0) // Default to Unix epoch (January 1, 1970)
-		} else {
-			modTime = entryInfo.ModTime()
+		// Determine size
+		var size int64 = -1          // Default when --with-sizes not used
+		var sizeStale bool = false   // Track if size data is missing from tree
+		if withSizes && sizeTreeRoot != nil {
+			// Build full path for this item
+			itemFullPath := filepath.Join(fullPath, entry.Name())
+			sizeTreeMutex.RLock()
+			if fileData := sizeTreeRoot.FindByPath(itemFullPath); fileData != nil {
+				size = fileData.Size()
+			} else {
+				// Item exists on filesystem but not in tree (new file/folder added)
+				sizeStale = true
+			}
+			sizeTreeMutex.RUnlock()
 		}
 
-		fileType := getFileType(entry)
 		item := FileItem{
-			Type:     fileType,
-			Name:     entry.Name(),
-			Path:     itemRelativePath,
-			Modified: modTime,
+			Name:      entry.Name(),
+			Path:      itemRelativePath,
+			IsDir:     entry.IsDir(),
+			Size:      size,
+			SizeStale: sizeStale,
 		}
 
-		if fileType == "folder" {
+		// Separate folders from files using entry.IsDir()
+		if entry.IsDir() {
 			folders = append(folders, item)
 		} else {
 			files = append(files, item)
@@ -980,9 +1279,10 @@ func getDirectoryListing(relativePath, sortBy, dir string) []FileItem {
 	sortItems := func(items []FileItem) {
 		sort.Slice(items, func(i, j int) bool {
 			var result bool
-			if sortBy == "modified" {
-				result = items[i].Modified.Before(items[j].Modified)
-			} else { // default to name sorting
+			switch sortBy {
+			case "size":
+				result = items[i].Size < items[j].Size
+			default: // default to name sorting
 				result = strings.ToLower(items[i].Name) < strings.ToLower(items[j].Name)
 			}
 			// Reverse if descending

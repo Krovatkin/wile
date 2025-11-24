@@ -64,8 +64,8 @@
                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16V4m0 0L3 8m4-4l4 4m6 0v12m0 0l4-4m-4 4l-4-4"></path>
                             </svg>
                         </button>
-                        <button class="text-sm font-semibold text-gray-600 hover:text-gray-900 whitespace-nowrap" onclick="sortBy('modified')">
-                            Modified
+                        <button class="text-sm font-semibold text-gray-600 hover:text-gray-900 whitespace-nowrap" onclick="sortBy('size')">
+                            Size
                             <svg class="w-4 h-4 inline-block" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16V4m0 0L3 8m4-4l4 4m6 0v12m0 0l4-4m-4 4l-4-4"></path>
                             </svg>
@@ -227,23 +227,25 @@
 
         // Helper function to create file/folder item with delete button
         function createItemHTML(entryObj, attributes, icon) {
-            const { name, path, type, modified } = entryObj;
+            const { name, path, isDir, size, sizeStale } = entryObj;
 
-            // Format the modified date to dd/mm/yy using Intl.DateTimeFormat
-            const formatDate = (dateString) => {
-                const date = new Date(dateString);
-                const formatter = new Intl.DateTimeFormat('en-GB', {
-                    day: '2-digit',
-                    month: '2-digit',
-                    year: '2-digit'
-                });
-                return formatter.format(date);
+            // Format size to human-readable format
+            const formatSize = (bytes) => {
+                if (bytes < 0) return '-';
+                if (bytes < 1024) return bytes + '  B';
+                if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(2) + ' KB';
+                if (bytes < 1024 * 1024 * 1024) return (bytes / (1024 * 1024)).toFixed(2) + ' MB';
+                if (bytes < 1024 * 1024 * 1024 * 1024) return (bytes / (1024 * 1024 * 1024)).toFixed(2) + ' GB';
+                return (bytes / (1024 * 1024 * 1024 * 1024)).toFixed(2) + ' TB';
             };
 
-            const formattedDate = formatDate(modified);
+            const formattedSize = formatSize(size);
+
+            // Add warning emoji if size data is stale
+            const sizeDisplay = sizeStale ? `⚠️ ${formattedSize}` : formattedSize;
 
             // Download button (only for folders)
-            const downloadButton = type === 'folder' ? `
+            const downloadButton = isDir ? `
                 <button onclick="downloadFolder('${path.replace(/'/g, "\\'")}', event)"
                         class="p-1 hover:bg-blue-100 rounded"
                         title="Download folder as ZIP">
@@ -254,7 +256,7 @@
             const renameButton = `
                 <button onclick="renameItem('${path.replace(/'/g, "\\'")}', '${name.replace(/'/g, "\\'")}', event)"
                         class="p-1 hover:bg-gray-100 rounded"
-                        title="Rename ${type}">
+                        title="Rename ${isDir ? 'folder' : 'file'}">
                     ${ICONS.rename}
                 </button>
             `;
@@ -262,7 +264,7 @@
             const deleteButton = `
                 <button onclick="deleteItem('${path.replace(/'/g, "\\'")}', event)"
                         class="delete-btn p-1 hover:bg-red-100 rounded"
-                        title="Delete ${type}">
+                        title="Delete ${isDir ? 'folder' : 'file'}">
                     ${ICONS.delete}
                 </button>
             `;
@@ -275,7 +277,7 @@
                             <span class="truncate">${name}</span>
                         </div>
                         <div class="text-sm text-gray-500 whitespace-nowrap">
-                            ${formattedDate}
+                            ${sizeDisplay}
                         </div>
                         <div class="flex gap-1">
                             ${downloadButton}
@@ -751,7 +753,6 @@
         const folderTemplate = (item) => {
             const {name, path} = item;
 
-            item.type = 'folder'
             return createItemHTML(item,
                 `href="javascript:void(0)" ondblclick="navigateToFolder('${item.path.replace(/'/g, "\\'")}')" class="text-yellow-600 hover:bg-yellow-50" onclick="event.preventDefault(); toggleFileSelection(this);" data-file-type="folder" data-path="${path}"`,
                 ICONS.folder
@@ -759,13 +760,13 @@
         };
 
         const fileTemplate = (item) => {
-            const {name, path, type} = item;
-            const isImage = type === 'image' || isImageFile(name);
-            const isDocument = type === 'document' || isDocumentFile(name);
+            const {name, path} = item;
+            const isImage = isImageFile(name);
+            const isDocument = isDocumentFile(name);
             const isSelected = selected.has(path);
-            
+
             let colorClass, fileType;
-            
+
             if (isImage) {
                 fileType = 'image';
                 colorClass = isSelected ? '!bg-blue-200 !text-white' : 'text-green-600 hover:bg-green-50';
@@ -895,12 +896,12 @@
 
                 // Process each item in the array and append immediately
                 data.forEach(item => {
-                    if (item.type === 'folder') {
+                    if (item.isDir) {
                         if (!hasFolders) {
                             hasFolders = true;
                         }
                         appendToFileList(folderTemplate(item));
-                    } else if (item.type === 'file' || item.type === 'image' || item.type === 'document') {
+                    } else {
                         if (!hasFiles) {
                             hasFiles = true;
                             addDividerIfNeeded();
