@@ -573,8 +573,15 @@ func saveSizeTree(filename string) error {
 
 // buildSizeTree scans the directory tree and builds the size tree
 func buildSizeTree(rootPath string) error {
+	// Create and start progress spinner
+	spinner := scan.NewProgressSpinner()
+
 	// Scan the directory tree
-	children, err := scan.ScanDirConcurrent(rootPath, 0)
+	children, err := scan.ScanDirConcurrent(rootPath, 0, spinner)
+
+	// Stop spinner regardless of error
+	spinner.Stop()
+
 	if err != nil {
 		return err
 	}

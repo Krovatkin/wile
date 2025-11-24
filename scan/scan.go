@@ -6,7 +6,7 @@ import (
 	"sync"
 )
 
-func ScanDirConcurrent(dir string, concurrency int) ([]*FileData, error) {
+func ScanDirConcurrent(dir string, concurrency int, spinner *ProgressSpinner) ([]*FileData, error) {
 	root := newRootFileData(dir)
 
 	if concurrency == 0 {
@@ -21,14 +21,17 @@ func ScanDirConcurrent(dir string, concurrency int) ([]*FileData, error) {
 	for i := 0; i < concurrency; i++ {
 		go func() {
 			for file := range ch {
-				scanDir(file, ch, closeWait)
+				scanDir(file, ch, closeWait, spinner)
 				closeWait.Done()
+				if spinner != nil {
+					spinner.IncrementProcessed()
+				}
 			}
 			wait.Done()
 		}()
 	}
 
-	err := scanDir(root, ch, closeWait)
+	err := scanDir(root, ch, closeWait, spinner)
 	if err != nil {
 		return nil, err
 	}
@@ -52,7 +55,7 @@ func DefaultConcurrency() int {
 	return numCPU
 }
 
-func scanDir(parent *FileData, ch chan *FileData, closeWait *sync.WaitGroup) error {
+func scanDir(parent *FileData, ch chan *FileData, closeWait *sync.WaitGroup, spinner *ProgressSpinner) error {
 	if !parent.Root() && (parent.CachedSize != -1 || !parent.Info.IsDir()) {
 		return nil
 	}
@@ -64,6 +67,9 @@ func scanDir(parent *FileData, ch chan *FileData, closeWait *sync.WaitGroup) err
 
 	children := []*FileData{}
 	closeWait.Add(len(entries))
+	if spinner != nil {
+		spinner.IncrementDiscovered(len(entries))
+	}
 	for _, entry := range entries {
 		info, err := entry.Info()
 		if err != nil {
