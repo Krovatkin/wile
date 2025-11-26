@@ -11,7 +11,7 @@ WILE_PATH = "/Users/nikolayk/github/wile/wile"
 TEST_DIR = "/Users/nikolayk/github/wile/test_sizes"
 
 def start_server():
-    cmd = [WILE_PATH, "--path", TEST_DIR, "--port", "3000", "--with-size", "--write"]
+    cmd = [WILE_PATH, "--path", TEST_DIR, "--port", "3000", "--with-sizes", "--write"]
     print(f"Starting: {' '.join(cmd)}")
     process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     time.sleep(4)

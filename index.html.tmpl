@@ -46,6 +46,13 @@
                 Paste
             </button>
             <div class="divider divider-horizontal"></div>
+            <button id="newFolderBtn" class="btn btn-sm btn-ghost" onclick="createNewFolder()">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 13h6m-3-3v6m-9 1V7a2 2 0 012-2h6l2 2h6a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2z"></path>
+                </svg>
+                New Folder
+            </button>
+            <div class="divider divider-horizontal"></div>
             <span id="selectionCount" class="text-sm text-gray-500">No items selected</span>
         </div>
 
@@ -429,6 +436,36 @@
                 console.error('Error renaming item:', error);
                 showNotification('Failed to rename item', 'error');
             });
+        }
+
+        // Create new folder operation
+        function createNewFolder() {
+            const folderName = prompt('Enter folder name:');
+            if (!folderName) {
+                return; // User cancelled
+            }
+
+            const currentPath = getTabs()[activeTabIndex].path;
+            const params = new URLSearchParams();
+            params.append('action', 'new_folder');
+            params.append('dest', currentPath);
+            params.append('name', folderName);
+
+            fetch('/manage?' + params.toString())
+                .then(response => response.json())
+                .then(data => {
+                    if (data.status === 'ok') {
+                        showNotification(`Created folder "${folderName}"`, 'info');
+                        // Refresh the current directory
+                        loadDirectory(currentPath);
+                    } else {
+                        showNotification(data.error || 'Failed to create folder', 'error');
+                    }
+                })
+                .catch(error => {
+                    console.error('Error creating folder:', error);
+                    showNotification('Failed to create folder', 'error');
+                });
         }
 
         // Delete file/folder operation

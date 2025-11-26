@@ -112,6 +112,71 @@ func handleManage(c *fiber.Ctx) error {
 	action := c.Query("action")
 	dest := c.Query("dest", "")
 
+	// Special handling for new_folder action
+	if action == "new_folder" {
+		folderName := c.Query("name")
+		if folderName == "" {
+			return c.Status(400).JSON(fiber.Map{
+				"status": "error",
+				"error":  "Missing required parameter: name",
+			})
+		}
+
+		// Validate folder name doesn't contain path separators
+		if strings.Contains(folderName, "/") || strings.Contains(folderName, "\\") {
+			return c.Status(400).JSON(fiber.Map{
+				"status": "error",
+				"error":  "Folder name cannot contain path separators",
+			})
+		}
+
+		// Build full path for new folder
+		destPath := filepath.Join(rootPath, dest)
+		newFolderPath := filepath.Join(destPath, folderName)
+
+		// Check if folder already exists
+		if _, err := os.Stat(newFolderPath); err == nil {
+			return c.Status(400).JSON(fiber.Map{
+				"status": "error",
+				"error":  "A file or folder with that name already exists",
+			})
+		}
+
+		// Create the folder
+		if err := os.Mkdir(newFolderPath, 0755); err != nil {
+			log.Printf("Error creating folder %s: %v", newFolderPath, err)
+			return c.Status(500).JSON(fiber.Map{
+				"status": "error",
+				"error":  fmt.Sprintf("Failed to create folder: %v", err),
+			})
+		}
+
+		// Update size tree if enabled
+		if withSizes && sizeTreeRoot != nil {
+			sizeTreeMutex.Lock()
+			// Find parent node and add new folder node
+			if parent := sizeTreeRoot.FindByPath(destPath); parent != nil {
+				newInfo, err := os.Stat(newFolderPath)
+				if err == nil {
+					newNode := &scan.FileData{
+						Parent:     parent,
+						Dir:        newFolderPath,
+						Info:       newInfo,
+						CachedSize: 0, // Empty folder
+						Children:   []*scan.FileData{},
+					}
+					parent.Children = append(parent.Children, newNode)
+				}
+			}
+			sizeTreeMutex.Unlock()
+		}
+
+		log.Printf("Created folder: %s", newFolderPath)
+		return c.JSON(fiber.Map{
+			"status": "ok",
+		})
+	}
+
 	if sources == "" || action == "" {
 		return c.Status(400).JSON(fiber.Map{
 			"status": "error",
@@ -587,7 +652,7 @@ func buildSizeTree(rootPath string) error {
 	}
 
 	// Create root node with children
-	sizeTreeRoot = &scan.FileData{}
+	sizeTreeRoot = &scan.FileData{Dir: rootPath}
 	sizeTreeRoot.Children = children
 
 	// Compute all sizes eagerly by calling Size() on root

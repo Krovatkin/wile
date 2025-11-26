@@ -14,10 +14,10 @@ WILE_PATH = "/Users/nikolayk/github/wile/wile"
 TEST_DIR = "/Users/nikolayk/github/wile/test_sizes"
 
 def start_wile_server(with_size=True):
-    """Start wile server with or without --with-size flag"""
+    """Start wile server with or without --with-sizes flag"""
     cmd = [WILE_PATH, "--path", TEST_DIR, "--port", "3000"]
     if with_size:
-        cmd.append("--with-size")
+        cmd.append("--with-sizes")
 
     print(f"Starting wile: {' '.join(cmd)}")
     process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
@@ -35,8 +35,8 @@ def stop_server(process):
         time.sleep(1)
 
 def test_size_with_flag():
-    """Test 1: Size display with --with-size flag"""
-    print("\n=== TEST 1: Size display with --with-size flag ===")
+    """Test 1: Size display with --with-sizes flag"""
+    print("\n=== TEST 1: Size display with --with-sizes flag ===")
 
     process = start_wile_server(with_size=True)
 
@@ -94,14 +94,14 @@ def test_size_with_flag():
             print("✓ Screenshot saved: test_sizes_with_flag.png")
 
             browser.close()
-            print("\n✅ TEST 1 PASSED: Sizes displayed correctly with --with-size flag")
+            print("\n✅ TEST 1 PASSED: Sizes displayed correctly with --with-sizes flag")
 
     finally:
         stop_server(process)
 
 def test_size_without_flag():
-    """Test 2: Size display without --with-size flag"""
-    print("\n=== TEST 2: Size display without --with-size flag ===")
+    """Test 2: Size display without --with-sizes flag"""
+    print("\n=== TEST 2: Size display without --with-sizes flag ===")
 
     process = start_wile_server(with_size=False)
 
@@ -138,7 +138,7 @@ def test_size_without_flag():
             print("✓ Screenshot saved: test_sizes_without_flag.png")
 
             browser.close()
-            print("\n✅ TEST 2 PASSED: All sizes show '-' without --with-size flag")
+            print("\n✅ TEST 2 PASSED: All sizes show '-' without --with-sizes flag")
 
     finally:
         stop_server(process)

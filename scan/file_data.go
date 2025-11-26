@@ -3,6 +3,7 @@ package scan
 import (
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 type FileData struct {
@@ -62,14 +63,21 @@ func (d *FileData) UpdateParentSizes(delta int64) {
 	}
 }
 
-// FindByPath recursively searches for a node with the given path
+// FindByPath efficiently searches for a node with the given path.
+// Optimized to O(depth) instead of O(total files) by only descending into
+// children that are on the path to the target.
 func (d *FileData) FindByPath(targetPath string) *FileData {
 	if d.Path() == targetPath {
 		return d
 	}
+
+	// Only recurse into child if it's on the path to target
+	// We append "/" to both paths to ensure exact path component matching:
+	// - "/tmp/test/" is a prefix of "/tmp/test/folder/" ✓
+	// - "/tmp/test/" is NOT a prefix of "/tmp/test123/" ✗
 	for _, child := range d.Children {
-		if found := child.FindByPath(targetPath); found != nil {
-			return found
+		if strings.HasPrefix(targetPath+"/", child.Path()+"/") {
+			return child.FindByPath(targetPath)
 		}
 	}
 	return nil
