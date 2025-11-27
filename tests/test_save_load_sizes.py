@@ -3,9 +3,9 @@
 Test size tree save/load with modifications
 
 Scenarios:
-1. Scan tree with --with-sizes, do modifications, Ctrl+C saves
-2. Load with --sizes-from, verify sizes persist
-3. Load with --sizes-from, add new file (shows ⚠️), Ctrl+C updates tree
+1. Scan tree with --sizes, do modifications, Ctrl+C saves
+2. Load with --sizes, verify sizes persist
+3. Load with --sizes, add new file (shows ⚠️), Ctrl+C updates tree
 """
 import subprocess
 import time
@@ -41,15 +41,15 @@ def setup():
 
 def test_scenario_1():
     """
-    Scenario 1: Scan with --with-sizes, Ctrl+C saves tree
+    Scenario 1: Scan with --sizes, Ctrl+C saves tree
     """
     print("\n" + "="*70)
     print("SCENARIO 1: Scan, Ctrl+C, Verify Save")
     print("="*70)
 
-    # Start server with --with-sizes
-    print("\n1. Starting server with --with-sizes...")
-    cmd = [WILE_BIN, "--path", TEST_DIR, "--port", "9095", "--with-sizes", "--write"]
+    # Start server with --sizes
+    print("\n1. Starting server with --sizes...")
+    cmd = [WILE_BIN, "--path", TEST_DIR, "--port", "9095", "--sizes", SIZES_JSON, "--write"]
     proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     time.sleep(3)
 
@@ -93,7 +93,7 @@ def test_scenario_1():
 
 def test_scenario_2():
     """
-    Scenario 2: Load with --sizes-from, verify sizes persist
+    Scenario 2: Load with --sizes, verify sizes persist
     """
     print("\n" + "="*70)
     print("SCENARIO 2: Load from JSON, Verify Sizes")
@@ -142,9 +142,9 @@ def test_scenario_3():
         f.write("w" * 4000)  # 4KB
     print(f"   ✓ Created {new_file}")
 
-    # Start server with --sizes-from
-    print("\n2. Starting server with --sizes-from...")
-    cmd = [WILE_BIN, "--path", TEST_DIR, "--port", "9096", "--sizes-from", SIZES_JSON, "--write"]
+    # Start server with --sizes
+    print("\n2. Starting server with --sizes...")
+    cmd = [WILE_BIN, "--path", TEST_DIR, "--port", "9096", "--sizes", SIZES_JSON, "--write"]
     proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     time.sleep(3)
 

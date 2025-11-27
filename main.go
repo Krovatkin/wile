@@ -557,8 +557,7 @@ var (
 	libreOfficeAppPath string
 	writeMode          bool
 	withSizes          bool
-	sizesFrom          string
-	sizesTo            string
+	sizesFile          string             // Path to JSON sizes file (load/save)
 	sizesDb            string             // Path to bbolt database
 	boltDB             *bolt.DB           // bbolt database handle
 	sizeTreeRoot       *scan.FileData     // Root of the size tree, walk from here
@@ -834,21 +833,20 @@ func main() {
 	flag.StringVar(&libreOfficeAppPath, "libreoffice", "", "Path to LibreOffice AppImage executable (optional - enables office document viewing)")
 	flag.BoolVar(&writeMode, "write", false, "Enable write mode (allows file operations)")
 	flag.BoolVar(&withSizes, "with-sizes", false, "Compute and display cumulative directory sizes")
-	flag.StringVar(&sizesFrom, "sizes-from", "", "Load size tree from JSON file (default: sizes.json if flag provided without value)")
-	flag.StringVar(&sizesTo, "sizes-to", "sizes.json", "Save size tree to JSON file on exit (default: sizes.json)")
-	flag.StringVar(&sizesDb, "sizes-db", "", "Use bbolt database for size tree (path to .db file)")
+	flag.StringVar(&sizesFile, "sizes", "", "JSON file for size tree (loads if exists, saves on exit)")
+	flag.StringVar(&sizesDb, "sizes-db", "", "bbolt database for size tree (loads if exists, saves incrementally)")
 	flag.StringVar(&port, "port", "8080", "Port to listen on (default 8080)")
 	flag.Parse()
 
 	// Validate mutually exclusive flags
-	if withSizes && sizesFrom != "" {
-		log.Fatal("Error: --with-sizes and --sizes-from are mutually exclusive")
+	if withSizes && sizesFile != "" {
+		log.Fatal("Error: --with-sizes and --sizes are mutually exclusive")
 	}
 	if withSizes && sizesDb != "" {
 		log.Fatal("Error: --with-sizes and --sizes-db are mutually exclusive")
 	}
-	if sizesFrom != "" && sizesDb != "" {
-		log.Fatal("Error: --sizes-from and --sizes-db are mutually exclusive")
+	if sizesFile != "" && sizesDb != "" {
+		log.Fatal("Error: --sizes and --sizes-db are mutually exclusive")
 	}
 
 	// Handle version flag
@@ -919,18 +917,29 @@ func main() {
 			log.Println("Size tree loaded from database successfully")
 			withSizes = true
 		}
-	} else if sizesFrom != "" {
-		// Load sizes from JSON
-		if sizesFrom == "sizes.json" || sizesFrom == "" {
-			sizesFrom = filepath.Join(rootPath, "sizes.json")
+	} else if sizesFile != "" {
+		// Try to load sizes from JSON file
+		if _, err := os.Stat(sizesFile); err == nil {
+			// File exists, load it
+			log.Printf("Loading size tree from: %s", sizesFile)
+			err := loadSizeTree(sizesFile)
+			if err != nil {
+				log.Fatalf("Failed to load size tree: %v", err)
+			}
+			log.Println("Size tree loaded successfully")
+			withSizes = true
+		} else {
+			// File doesn't exist, compute sizes
+			log.Printf("Size file %s not found, computing sizes...", sizesFile)
+			err := buildSizeTree(rootPath)
+			if err != nil {
+				log.Printf("Warning: Failed to compute sizes: %v", err)
+				withSizes = false
+			} else {
+				log.Println("Directory size computation complete")
+				withSizes = true
+			}
 		}
-		log.Printf("Loading size tree from: %s", sizesFrom)
-		err := loadSizeTree(sizesFrom)
-		if err != nil {
-			log.Fatalf("Failed to load size tree: %v", err)
-		}
-		log.Println("Size tree loaded successfully")
-		withSizes = true // Enable size display
 	} else if withSizes {
 		// Compute sizes from scratch
 		log.Println("Computing directory sizes...")
@@ -1035,12 +1044,9 @@ func main() {
 		}
 	}
 
-	// Save size tree to JSON if not using bbolt
-	if sizeTreeRoot != nil && withSizes && boltDB == nil {
-		saveFile := sizesTo
-		if saveFile == "" {
-			saveFile = "sizes.json"
-		}
+	// Save size tree to JSON if using --sizes flag
+	if sizeTreeRoot != nil && withSizes && boltDB == nil && sizesFile != "" {
+		saveFile := sizesFile
 		// If it's a relative path, make it relative to rootPath
 		if !filepath.IsAbs(saveFile) {
 			saveFile = filepath.Join(rootPath, saveFile)
