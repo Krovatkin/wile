@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	bolt "go.etcd.io/bbolt"
 	"html/template"
 	"io"
 	"io/ioutil"
@@ -165,6 +166,14 @@ func handleManage(c *fiber.Ctx) error {
 					Children:   []*scan.FileData{},
 				}
 				parent.Children = append(parent.Children, newNode)
+
+				// Update bolt database incrementally (still holding sizeTreeMutex)
+				if boltDB != nil {
+					err := updateNodeInBolt(boltDB, newNode)
+					if err != nil {
+						log.Printf("Warning: Failed to update bolt db for new folder: %v", err)
+					}
+				}
 			}
 			sizeTreeMutex.Unlock()
 		}
@@ -262,6 +271,21 @@ func handleManage(c *fiber.Ctx) error {
 				nodeToDelete.UpdateParentSizes(-sizeToSubtract) // Subtract from parent chain
 				if nodeToDelete.Parent != nil {
 					nodeToDelete.Parent.RemoveChild(nodeToDelete)
+
+					// Update bolt database: delete node and update all parents (still holding sizeTreeMutex)
+					if boltDB != nil {
+						err := deleteNodePathInBolt(boltDB, srcPath)
+						if err != nil {
+							log.Printf("Warning: Failed to delete from bolt db: %v", err)
+						}
+						// Update all parents in bolt
+						for p := nodeToDelete.Parent; p != nil; p = p.Parent {
+							err := updateNodeInBolt(boltDB, p)
+							if err != nil {
+								log.Printf("Warning: Failed to update parent in bolt db: %v", err)
+							}
+						}
+					}
 				}
 				sizeTreeMutex.Unlock()
 			}
@@ -322,12 +346,23 @@ func handleManage(c *fiber.Ctx) error {
 						parentPath := filepath.Dir(targetPath)
 						if parent := sizeTreeRoot.FindByPath(parentPath); parent != nil {
 							parent.UpdateParentSizes(sizeToAdd)
+
+							// Update bolt database: update all parents (still holding sizeTreeMutex)
+							if boltDB != nil {
+								for p := parent; p != nil; p = p.Parent {
+									err := updateNodeInBolt(boltDB, p)
+									if err != nil {
+										log.Printf("Warning: Failed to update parent in bolt db: %v", err)
+									}
+								}
+							}
 						}
 					}
 				} else { // paste (move)
 					// For move, subtract from old parent and add to new parent
 					if oldNode := sizeTreeRoot.FindByPath(srcPath); oldNode != nil {
 						size := oldNode.Size()
+						oldParent := oldNode.Parent
 
 						// Remove from old location
 						oldNode.UpdateParentSizes(-size)
@@ -343,6 +378,32 @@ func handleManage(c *fiber.Ctx) error {
 							oldNode.UpdateParentSizes(size)
 							// Update the path after move
 							oldNode.Dir = targetPath
+
+							// Update bolt database: delete old path, save new path, update parents (still holding sizeTreeMutex)
+							if boltDB != nil {
+								err := deleteNodePathInBolt(boltDB, srcPath)
+								if err != nil {
+									log.Printf("Warning: Failed to delete old path from bolt db: %v", err)
+								}
+								err = updateNodeInBolt(boltDB, oldNode)
+								if err != nil {
+									log.Printf("Warning: Failed to update moved node in bolt db: %v", err)
+								}
+								// Update old parent chain
+								for p := oldParent; p != nil; p = p.Parent {
+									err := updateNodeInBolt(boltDB, p)
+									if err != nil {
+										log.Printf("Warning: Failed to update old parent in bolt db: %v", err)
+									}
+								}
+								// Update new parent chain
+								for p := newParent; p != nil; p = p.Parent {
+									err := updateNodeInBolt(boltDB, p)
+									if err != nil {
+										log.Printf("Warning: Failed to update new parent in bolt db: %v", err)
+									}
+								}
+							}
 						}
 					}
 				}
@@ -498,9 +559,11 @@ var (
 	withSizes          bool
 	sizesFrom          string
 	sizesTo            string
-	sizeTreeRoot       *scan.FileData // Root of the size tree, walk from here
-	sizeTreeMutex      sync.RWMutex   // Protects sizeTreeRoot from concurrent access
-	fileOpsInProgress  sync.WaitGroup // Tracks in-flight file operations
+	sizesDb            string             // Path to bbolt database
+	boltDB             *bolt.DB           // bbolt database handle
+	sizeTreeRoot       *scan.FileData     // Root of the size tree, walk from here
+	sizeTreeMutex      sync.RWMutex       // Protects sizeTreeRoot from concurrent access
+	fileOpsInProgress  sync.WaitGroup     // Tracks in-flight file operations
 	// Version information - these will be set at build time
 	version   = "0.2.1-alpha" // Default version
 	buildDate = "unknown"     // Will be set during build
@@ -630,6 +693,112 @@ func saveSizeTree(filename string) error {
 	return nil
 }
 
+// bbolt helper functions
+
+// openBoltDB opens or creates a bbolt database
+func openBoltDB(path string) (*bolt.DB, error) {
+	db, err := bolt.Open(path, 0600, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open bolt db: %w", err)
+	}
+
+	// Create the sizes bucket if it doesn't exist
+	err = db.Update(func(tx *bolt.Tx) error {
+		_, err := tx.CreateBucketIfNotExists([]byte("sizes"))
+		return err
+	})
+	if err != nil {
+		db.Close()
+		return nil, fmt.Errorf("failed to create bucket: %w", err)
+	}
+
+	return db, nil
+}
+
+// saveNodeToBolt saves a single node to the bolt database
+// Must be called within a bolt transaction
+func saveNodeToBolt(bucket *bolt.Bucket, node *scan.FileData) error {
+	stored := node.ToStored()
+	data, err := stored.MarshalBinary()
+	if err != nil {
+		return fmt.Errorf("failed to marshal node: %w", err)
+	}
+
+	return bucket.Put([]byte(node.Path()), data)
+}
+
+// deleteNodeFromBolt deletes a single node from the bolt database
+// Must be called within a bolt transaction
+func deleteNodeFromBolt(bucket *bolt.Bucket, path string) error {
+	return bucket.Delete([]byte(path))
+}
+
+// updateNodeInBolt updates a single node in the database
+func updateNodeInBolt(db *bolt.DB, node *scan.FileData) error {
+	return db.Update(func(tx *bolt.Tx) error {
+		bucket := tx.Bucket([]byte("sizes"))
+		return saveNodeToBolt(bucket, node)
+	})
+}
+
+// deleteNodePathInBolt deletes a node by path from the database
+func deleteNodePathInBolt(db *bolt.DB, path string) error {
+	return db.Update(func(tx *bolt.Tx) error {
+		bucket := tx.Bucket([]byte("sizes"))
+		return deleteNodeFromBolt(bucket, path)
+	})
+}
+
+// loadSizeTreeFromBolt loads the entire size tree from bolt database
+func loadSizeTreeFromBolt(db *bolt.DB, rootPath string) (*scan.FileData, error) {
+	storedNodes := make(map[string]*scan.StoredFileData)
+
+	err := db.View(func(tx *bolt.Tx) error {
+		bucket := tx.Bucket([]byte("sizes"))
+		if bucket == nil {
+			return fmt.Errorf("sizes bucket not found")
+		}
+
+		return bucket.ForEach(func(k, v []byte) error {
+			var stored scan.StoredFileData
+			if err := stored.UnmarshalBinary(v); err != nil {
+				return fmt.Errorf("failed to unmarshal node %s: %w", k, err)
+			}
+			storedNodes[string(k)] = &stored
+			return nil
+		})
+	})
+
+	if err != nil {
+		return nil, err
+	}
+
+	return scan.LoadTreeFromStored(storedNodes, rootPath)
+}
+
+// saveSizeTreeToBolt saves the entire size tree to bolt database
+func saveSizeTreeToBolt(db *bolt.DB, root *scan.FileData) error {
+	return db.Update(func(tx *bolt.Tx) error {
+		bucket := tx.Bucket([]byte("sizes"))
+
+		// Recursively save all nodes
+		var saveRecursive func(*scan.FileData) error
+		saveRecursive = func(node *scan.FileData) error {
+			if err := saveNodeToBolt(bucket, node); err != nil {
+				return err
+			}
+			for _, child := range node.Children {
+				if err := saveRecursive(child); err != nil {
+					return err
+				}
+			}
+			return nil
+		}
+
+		return saveRecursive(root)
+	})
+}
+
 // buildSizeTree scans the directory tree and builds the size tree
 func buildSizeTree(rootPath string) error {
 	// Create and start progress spinner
@@ -667,12 +836,19 @@ func main() {
 	flag.BoolVar(&withSizes, "with-sizes", false, "Compute and display cumulative directory sizes")
 	flag.StringVar(&sizesFrom, "sizes-from", "", "Load size tree from JSON file (default: sizes.json if flag provided without value)")
 	flag.StringVar(&sizesTo, "sizes-to", "sizes.json", "Save size tree to JSON file on exit (default: sizes.json)")
+	flag.StringVar(&sizesDb, "sizes-db", "", "Use bbolt database for size tree (path to .db file)")
 	flag.StringVar(&port, "port", "8080", "Port to listen on (default 8080)")
 	flag.Parse()
 
 	// Validate mutually exclusive flags
 	if withSizes && sizesFrom != "" {
 		log.Fatal("Error: --with-sizes and --sizes-from are mutually exclusive")
+	}
+	if withSizes && sizesDb != "" {
+		log.Fatal("Error: --with-sizes and --sizes-db are mutually exclusive")
+	}
+	if sizesFrom != "" && sizesDb != "" {
+		log.Fatal("Error: --sizes-from and --sizes-db are mutually exclusive")
 	}
 
 	// Handle version flag
@@ -708,7 +884,42 @@ func main() {
 	log.Printf("Serving files from: %s", rootPath)
 
 	// Load or compute sizes
-	if sizesFrom != "" {
+	if sizesDb != "" {
+		// Open bbolt database
+		log.Printf("Opening bbolt database: %s", sizesDb)
+		var err error
+		boltDB, err = openBoltDB(sizesDb)
+		if err != nil {
+			log.Fatalf("Failed to open bbolt database: %v", err)
+		}
+
+		// Try to load existing tree from database
+		log.Println("Loading size tree from bbolt database...")
+		loadedRoot, err := loadSizeTreeFromBolt(boltDB, rootPath)
+		if err != nil {
+			// Database might be empty on first run
+			log.Printf("Could not load from database (might be first run): %v", err)
+			log.Println("Computing directory sizes...")
+			err = buildSizeTree(rootPath)
+			if err != nil {
+				log.Printf("Warning: Failed to compute sizes: %v", err)
+				withSizes = false
+			} else {
+				// Save initial tree to database
+				log.Println("Saving initial size tree to database...")
+				err = saveSizeTreeToBolt(boltDB, sizeTreeRoot)
+				if err != nil {
+					log.Printf("Warning: Failed to save to database: %v", err)
+				}
+				log.Println("Directory size computation complete")
+				withSizes = true
+			}
+		} else {
+			sizeTreeRoot = loadedRoot
+			log.Println("Size tree loaded from database successfully")
+			withSizes = true
+		}
+	} else if sizesFrom != "" {
 		// Load sizes from JSON
 		if sizesFrom == "sizes.json" || sizesFrom == "" {
 			sizesFrom = filepath.Join(rootPath, "sizes.json")
@@ -814,8 +1025,18 @@ func main() {
 	fileOpsInProgress.Wait()
 	log.Println("All file operations completed")
 
-	// Save size tree if it exists and either --with-sizes or --sizes-from was used
-	if sizeTreeRoot != nil && withSizes {
+	// Close bbolt database if open
+	if boltDB != nil {
+		log.Println("Closing bbolt database...")
+		if err := boltDB.Close(); err != nil {
+			log.Printf("Error closing bbolt database: %v", err)
+		} else {
+			log.Println("bbolt database closed successfully")
+		}
+	}
+
+	// Save size tree to JSON if not using bbolt
+	if sizeTreeRoot != nil && withSizes && boltDB == nil {
 		saveFile := sizesTo
 		if saveFile == "" {
 			saveFile = "sizes.json"
@@ -1112,6 +1333,18 @@ func handleRename(c *fiber.Ctx) error {
 		if node := sizeTreeRoot.FindByPath(oldPath); node != nil {
 			// Update Dir field with new path
 			node.Dir = newPath
+
+			// Update bolt database: delete old path, save new path (still holding sizeTreeMutex)
+			if boltDB != nil {
+				err := deleteNodePathInBolt(boltDB, oldPath)
+				if err != nil {
+					log.Printf("Warning: Failed to delete old path from bolt db: %v", err)
+				}
+				err = updateNodeInBolt(boltDB, node)
+				if err != nil {
+					log.Printf("Warning: Failed to update renamed node in bolt db: %v", err)
+				}
+			}
 		}
 		sizeTreeMutex.Unlock()
 	}

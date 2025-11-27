@@ -7,6 +7,7 @@ require (
 	github.com/gofiber/websocket/v2 v2.2.1
 	github.com/otiai10/copy v1.14.1
 	github.com/tus/tusd v1.13.0
+	go.etcd.io/bbolt v1.4.3
 )
 
 require (
@@ -21,7 +22,6 @@ require (
 	github.com/otiai10/mint v1.6.3 // indirect
 	github.com/rivo/uniseg v0.2.0 // indirect
 	github.com/savsgio/gotils v0.0.0-20230208104028-c358bd845dee // indirect
-	github.com/stretchr/testify v1.10.0 // indirect
 	github.com/valyala/bytebufferpool v1.0.0 // indirect
 	github.com/valyala/fasthttp v1.51.0 // indirect
 	github.com/valyala/tcplisten v1.0.0 // indirect
