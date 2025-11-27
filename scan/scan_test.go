@@ -31,7 +31,7 @@ func TestScanDirConcurrent(t *testing.T) {
 	}
 
 	// Scan the directory
-	children, err := ScanDirConcurrent(tmpDir, 0)
+	children, err := ScanDirConcurrent(tmpDir, 0, nil)
 	if err != nil {
 		t.Fatalf("ScanDirConcurrent failed: %v", err)
 	}
@@ -44,7 +44,7 @@ func TestScanDirConcurrent(t *testing.T) {
 	// Find the subdir and check its size
 	var subdir *FileData
 	for _, child := range children {
-		if child.Info.IsDir() && child.Info.Name() == "subdir" {
+		if child.IsDir && filepath.Base(child.Dir) == "subdir" {
 			subdir = child
 			break
 		}
@@ -110,7 +110,7 @@ func TestFileDataSize(t *testing.T) {
 	}
 
 	// Scan the directory
-	children, err := ScanDirConcurrent(tmpDir, 1)
+	children, err := ScanDirConcurrent(tmpDir, 1, nil)
 	if err != nil {
 		t.Fatalf("ScanDirConcurrent failed: %v", err)
 	}

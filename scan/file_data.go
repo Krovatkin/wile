@@ -1,7 +1,6 @@
 package scan
 
 import (
-	"os"
 	"path/filepath"
 	"strings"
 )
@@ -9,27 +8,29 @@ import (
 type FileData struct {
 	Parent     *FileData   `json:"-"` // Don't serialize parent to avoid cycles
 	Dir        string      `json:"dir"`
-	Info       os.FileInfo `json:"-"` // Don't serialize os.FileInfo
+	IsDir      bool        `json:"isDir"`
+	IsLink     bool        `json:"isLink"`
 	CachedSize int64       `json:"size"`
 	Children   []*FileData `json:"children,omitempty"`
 }
 
 func newRootFileData(dir string) *FileData {
-	return &FileData{Dir: dir, CachedSize: 0}
+	return &FileData{Dir: dir, IsDir: true, CachedSize: 0}
 }
 
-func newFileData(parent *FileData, file os.FileInfo) *FileData {
-	var size int64 = -1
-	if !file.IsDir() {
-		size = file.Size()
+func newFileData(parent *FileData, name string, isDir bool, isLink bool, size int64) *FileData {
+	fullPath := filepath.Join(parent.Path(), name)
+	return &FileData{
+		Parent:     parent,
+		Dir:        fullPath,
+		IsDir:      isDir,
+		IsLink:     isLink,
+		CachedSize: size,
 	}
-	// Store full path in Dir field (parent path + filename)
-	fullPath := filepath.Join(parent.Path(), file.Name())
-	return &FileData{Parent: parent, Dir: fullPath, Info: file, CachedSize: size}
 }
 
 func (d FileData) Root() bool {
-	return d.Info == nil
+	return d.Parent == nil
 }
 
 func (d FileData) Path() string {
@@ -43,9 +44,6 @@ func (d *FileData) Size() int64 {
 	}
 
 	var s int64
-	if d.Info != nil {
-		s += d.Info.Size()
-	}
 	for _, f := range d.Children {
 		s += f.Size()
 	}

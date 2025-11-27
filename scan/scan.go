@@ -1,6 +1,7 @@
 package scan
 
 import (
+	"io/fs"
 	"os"
 	"runtime"
 	"sync"
@@ -56,7 +57,7 @@ func DefaultConcurrency() int {
 }
 
 func scanDir(parent *FileData, ch chan *FileData, closeWait *sync.WaitGroup, spinner *ProgressSpinner) error {
-	if !parent.Root() && (parent.CachedSize != -1 || !parent.Info.IsDir()) {
+	if !parent.Root() && (parent.CachedSize != -1 || !parent.IsDir) {
 		return nil
 	}
 
@@ -71,12 +72,21 @@ func scanDir(parent *FileData, ch chan *FileData, closeWait *sync.WaitGroup, spi
 		spinner.IncrementDiscovered(len(entries))
 	}
 	for _, entry := range entries {
-		info, err := entry.Info()
-		if err != nil {
-			closeWait.Done()
-			continue
+		isDir := entry.IsDir()
+		isLink := entry.Type()&fs.ModeSymlink != 0
+
+		var size int64 = -1
+		if !isDir && !isLink {
+			// Only stat regular files to get size
+			info, err := entry.Info()
+			if err != nil {
+				closeWait.Done()
+				continue
+			}
+			size = info.Size()
 		}
-		f := newFileData(parent, info)
+
+		f := newFileData(parent, entry.Name(), isDir, isLink, size)
 		go func() {
 			ch <- f
 		}()

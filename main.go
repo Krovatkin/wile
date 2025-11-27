@@ -156,17 +156,15 @@ func handleManage(c *fiber.Ctx) error {
 			sizeTreeMutex.Lock()
 			// Find parent node and add new folder node
 			if parent := sizeTreeRoot.FindByPath(destPath); parent != nil {
-				newInfo, err := os.Stat(newFolderPath)
-				if err == nil {
-					newNode := &scan.FileData{
-						Parent:     parent,
-						Dir:        newFolderPath,
-						Info:       newInfo,
-						CachedSize: 0, // Empty folder
-						Children:   []*scan.FileData{},
-					}
-					parent.Children = append(parent.Children, newNode)
+				newNode := &scan.FileData{
+					Parent:     parent,
+					Dir:        newFolderPath,
+					IsDir:      true,
+					IsLink:     false,
+					CachedSize: 0, // Empty folder
+					Children:   []*scan.FileData{},
 				}
+				parent.Children = append(parent.Children, newNode)
 			}
 			sizeTreeMutex.Unlock()
 		}
@@ -343,12 +341,8 @@ func handleManage(c *fiber.Ctx) error {
 							oldNode.Parent = newParent
 							newParent.Children = append(newParent.Children, oldNode)
 							oldNode.UpdateParentSizes(size)
-							// Update the Info with new stat
-							newInfo, statErr := os.Stat(targetPath)
-							if statErr == nil {
-								oldNode.Info = newInfo
-								oldNode.Dir = targetPath
-							}
+							// Update the path after move
+							oldNode.Dir = targetPath
 						}
 					}
 				}
@@ -1116,13 +1110,8 @@ func handleRename(c *fiber.Ctx) error {
 	if withSizes && sizeTreeRoot != nil {
 		sizeTreeMutex.Lock()
 		if node := sizeTreeRoot.FindByPath(oldPath); node != nil {
-			// Update the Info with new stat
-			newInfo, err := os.Stat(newPath)
-			if err == nil {
-				node.Info = newInfo
-				// Update Dir field with new path
-				node.Dir = newPath
-			}
+			// Update Dir field with new path
+			node.Dir = newPath
 		}
 		sizeTreeMutex.Unlock()
 	}
