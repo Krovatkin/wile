@@ -57,7 +57,7 @@ func DefaultConcurrency() int {
 }
 
 func scanDir(parent *FileData, ch chan *FileData, closeWait *sync.WaitGroup, spinner *ProgressSpinner) error {
-	if !parent.Root() && (parent.CachedSize != -1 || !parent.IsDir) {
+	if !parent.IsDir || parent.IsLink {
 		return nil
 	}
 

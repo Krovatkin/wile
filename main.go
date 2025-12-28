@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
-	bolt "go.etcd.io/bbolt"
 	"html/template"
 	"io"
 	"io/ioutil"
@@ -20,6 +19,8 @@ import (
 	"sync"
 	"syscall"
 	"time"
+
+	bolt "go.etcd.io/bbolt"
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/fiber/v2/middleware/adaptor"
@@ -56,9 +57,9 @@ type IndexData struct {
 // ModificationLogEntry represents a single file operation logged to JSONL
 type ModificationLogEntry struct {
 	Timestamp string   `json:"timestamp"`
-	Action    string   `json:"action"`     // delete, copy, paste
-	Sources   []string `json:"sources"`    // source file paths
-	Dest      string   `json:"dest,omitempty"` // destination (empty for delete)
+	Action    string   `json:"action"`           // delete, copy, paste
+	Sources   []string `json:"sources"`          // source file paths
+	Dest      string   `json:"dest,omitempty"`   // destination (empty for delete)
 	Errors    []string `json:"errors,omitempty"` // errors if any
 }
 
@@ -179,6 +180,9 @@ func handleManage(c *fiber.Ctx) error {
 		}
 
 		log.Printf("Created folder: %s", newFolderPath)
+		// Log the operation
+		logModification("new_folder", nil, filepath.Join(dest, folderName), nil)
+
 		return c.JSON(fiber.Map{
 			"status": "ok",
 		})
@@ -323,37 +327,78 @@ func handleManage(c *fiber.Ctx) error {
 				// IMPORTANT: Must hold lock during size calculation to prevent races
 				sizeTreeMutex.Lock()
 				if action == "copy" {
-					// For copy, add size to new parent chain
+					// Handle copy updates: add new node to tree and DB
 					newInfo, statErr := os.Stat(targetPath)
 					if statErr == nil {
-						isDir := newInfo.IsDir()
-						var sizeToAdd int64
-						if isDir {
-							// For directories, walk and calculate total size
-							// Lock is held during this - necessary to prevent size from
-							// changing between calculation and tree update
-							filepath.Walk(targetPath, func(_ string, fi os.FileInfo, _ error) error {
-								if fi != nil && !fi.IsDir() {
-									sizeToAdd += fi.Size()
-								}
-								return nil
-							})
-						} else {
-							sizeToAdd = newInfo.Size()
-						}
-
-						// Add to new parent
 						parentPath := filepath.Dir(targetPath)
-						if parent := sizeTreeRoot.FindByPath(parentPath); parent != nil {
+						parent := sizeTreeRoot.FindByPath(parentPath)
+
+						if parent != nil {
+							var newNode *scan.FileData
+							if newInfo.IsDir() {
+								// Scan the new directory to build subtree
+								children, err := scan.ScanDirConcurrent(targetPath, 0, nil)
+								if err != nil {
+									log.Printf("Warning: Failed to scan new copy: %v", err)
+									// Create empty placeholder if scan fails
+									children = []*scan.FileData{}
+								}
+
+								newNode = &scan.FileData{
+									Parent:     parent,
+									Dir:        targetPath,
+									IsDir:      true,
+									Children:   children,
+									CachedSize: -1, // Force recalc
+								}
+								// Fix parent pointers for children
+								for _, child := range children {
+									child.RebuildParentPointers(newNode)
+								}
+							} else {
+								// File
+								newNode = &scan.FileData{
+									Parent:     parent,
+									Dir:        targetPath,
+									IsDir:      false,
+									CachedSize: newInfo.Size(),
+								}
+							}
+
+							// Compute size (recursively for dirs)
+							sizeToAdd := newNode.Size()
+
+							// Add to parent
+							parent.Children = append(parent.Children, newNode)
 							parent.UpdateParentSizes(sizeToAdd)
 
-							// Update bolt database: update all parents (still holding sizeTreeMutex)
+							// Update BoltDB
 							if boltDB != nil {
+								// Update all parents first
 								for p := parent; p != nil; p = p.Parent {
-									err := updateNodeInBolt(boltDB, p)
-									if err != nil {
-										log.Printf("Warning: Failed to update parent in bolt db: %v", err)
+									// Best effort
+									updateNodeInBolt(boltDB, p)
+								}
+
+								// Save new subtree
+								err := boltDB.Update(func(tx *bolt.Tx) error {
+									bucket := tx.Bucket([]byte("sizes"))
+									var saveRec func(*scan.FileData) error
+									saveRec = func(n *scan.FileData) error {
+										if err := saveNodeToBolt(bucket, n); err != nil {
+											return err
+										}
+										for _, c := range n.Children {
+											if err := saveRec(c); err != nil {
+												return err
+											}
+										}
+										return nil
 									}
+									return saveRec(newNode)
+								})
+								if err != nil {
+									log.Printf("Warning: Failed to save new copy to bolt db: %v", err)
 								}
 							}
 						}
@@ -447,7 +492,6 @@ type WSRequest struct {
 	SortBy    string `json:"sortBy"`
 	Dir       string `json:"dir"`
 }
-
 
 func handleDocument(c *fiber.Ctx) error {
 	// Check if office docs are enabled
@@ -557,12 +601,12 @@ var (
 	libreOfficeAppPath string
 	writeMode          bool
 	withSizes          bool
-	sizesFile          string             // Path to JSON sizes file (load/save)
-	sizesDb            string             // Path to bbolt database
-	boltDB             *bolt.DB           // bbolt database handle
-	sizeTreeRoot       *scan.FileData     // Root of the size tree, walk from here
-	sizeTreeMutex      sync.RWMutex       // Protects sizeTreeRoot from concurrent access
-	fileOpsInProgress  sync.WaitGroup     // Tracks in-flight file operations
+	sizesFile          string         // Path to JSON sizes file (load/save)
+	sizesDb            string         // Path to bbolt database
+	boltDB             *bolt.DB       // bbolt database handle
+	sizeTreeRoot       *scan.FileData // Root of the size tree, walk from here
+	sizeTreeMutex      sync.RWMutex   // Protects sizeTreeRoot from concurrent access
+	fileOpsInProgress  sync.WaitGroup // Tracks in-flight file operations
 	// Version information - these will be set at build time
 	version   = "0.2.1-alpha" // Default version
 	buildDate = "unknown"     // Will be set during build
@@ -623,19 +667,24 @@ func setupTusUpload(app *fiber.App) {
 	// Handle completed uploads
 	go func() {
 		for event := range tusHandler.CompleteUploads {
-			info := event.Upload
-			targetPath := info.MetaData["relativePath"]
-			filename := info.MetaData["filename"]
+			fileOpsInProgress.Add(1)
+			func() {
+				defer fileOpsInProgress.Done()
 
-			log.Printf("Upload completed - ID: %s, Filename: %s, TargetPath: %s", event.Upload.ID, filename, targetPath)
+				info := event.Upload
+				targetPath := info.MetaData["relativePath"]
+				filename := info.MetaData["filename"]
 
-			tempFile := filepath.Join(uploadsDir, event.Upload.ID)
-			finalPath := filepath.Join(rootPath, targetPath, filename)
-			log.Printf("Moving from %s to %s", tempFile, finalPath)
+				log.Printf("Upload completed - ID: %s, Filename: %s, TargetPath: %s", event.Upload.ID, filename, targetPath)
 
-			os.MkdirAll(filepath.Dir(finalPath), 0755)
-			move(tempFile, finalPath)
-			log.Printf("Successfully moved uploaded file to %s", finalPath)
+				tempFile := filepath.Join(uploadsDir, event.Upload.ID)
+				finalPath := filepath.Join(rootPath, targetPath, filename)
+				log.Printf("Moving from %s to %s", tempFile, finalPath)
+
+				os.MkdirAll(filepath.Dir(finalPath), 0755)
+				move(tempFile, finalPath)
+				log.Printf("Successfully moved uploaded file to %s", finalPath)
+			}()
 		}
 	}()
 
@@ -1544,8 +1593,8 @@ func getDirectoryListing(relativePath, sortBy, dir string) []FileItem {
 		itemRelativePath = filepath.ToSlash(itemRelativePath)
 
 		// Determine size
-		var size int64 = -1          // Default when --with-sizes not used
-		var sizeStale bool = false   // Track if size data is missing from tree
+		var size int64 = -1        // Default when --with-sizes not used
+		var sizeStale bool = false // Track if size data is missing from tree
 		if withSizes && sizeTreeRoot != nil {
 			// Build full path for this item
 			itemFullPath := filepath.Join(fullPath, entry.Name())
