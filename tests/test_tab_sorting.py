@@ -5,6 +5,10 @@ from playwright.sync_api import sync_playwright
 import time
 import os
 
+# Server configuration
+PORT = os.environ.get('PORT', '3000')
+BASE_URL = f'http://localhost:{PORT}'
+
 with sync_playwright() as p:
     browser = p.chromium.launch()
     page = browser.new_page()
@@ -111,6 +115,5 @@ with sync_playwright() as p:
 
     browser.close()
 # Server configuration
-PORT = os.environ.get('PORT', '3000')
-BASE_URL = f'http://localhost:{PORT}'
+
 

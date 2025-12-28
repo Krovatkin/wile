@@ -70,10 +70,10 @@ if command -v convert &> /dev/null; then
 
     echo "✓ Images created with ImageMagick"
 
-elif command -v python &> /dev/null; then
+elif command -v /Users/nikolayk/opt/miniconda3/envs/playwright/bin/python &> /dev/null; then
     # Using Python PIL
     echo "Using Python PIL to create images..."
-    python -c "
+    /Users/nikolayk/opt/miniconda3/envs/playwright/bin/python -c "
 from PIL import Image
 import os
 
@@ -96,7 +96,7 @@ for path, color in colors.items():
     size = (400, 400) if 'test_image' in path else (300, 300)
     img = Image.new('RGB', size, color)
     img.save(path)
-    print(f'Created {path}')
+    print('Created {}'.format(path))
 "
     echo "✓ Images created with Python PIL"
 

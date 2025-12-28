@@ -3,26 +3,40 @@ package scan
 import (
 	"path/filepath"
 	"strings"
+
+	"github.com/google/uuid"
 )
 
 type FileData struct {
-	Parent     *FileData   `json:"-"` // Don't serialize parent to avoid cycles
-	Dir        string      `json:"dir"`
-	IsDir      bool        `json:"isDir"`
-	IsLink     bool        `json:"isLink"`
-	CachedSize int64       `json:"size"`
-	Children   []*FileData `json:"children,omitempty"`
+	ID       string      `json:"id"`
+	Name     string      `json:"name"`
+	Parent   *FileData   `json:"-"` // Don't serialize parent to avoid cycles
+	Children []*FileData `json:"children,omitempty"`
+
+	// Metadata
+	IsDir      bool  `json:"isDir"`
+	IsLink     bool  `json:"isLink"`
+	CachedSize int64 `json:"size"`
+
+	// Root specific
+	RootPath string `json:"-"`
 }
 
 func newRootFileData(dir string) *FileData {
-	return &FileData{Dir: dir, IsDir: true, CachedSize: 0}
+	return &FileData{
+		ID:         uuid.New().String(),
+		Name:       filepath.Base(dir),
+		IsDir:      true,
+		CachedSize: 0,
+		RootPath:   dir,
+	}
 }
 
 func newFileData(parent *FileData, name string, isDir bool, isLink bool, size int64) *FileData {
-	fullPath := filepath.Join(parent.Path(), name)
 	return &FileData{
+		ID:         uuid.New().String(),
+		Name:       name,
 		Parent:     parent,
-		Dir:        fullPath,
 		IsDir:      isDir,
 		IsLink:     isLink,
 		CachedSize: size,
@@ -33,9 +47,12 @@ func (d FileData) Root() bool {
 	return d.Parent == nil
 }
 
+// Path returns the absolute path dynamically derived from the tree
 func (d FileData) Path() string {
-	// Dir now contains the full path
-	return d.Dir
+	if d.Root() {
+		return d.RootPath
+	}
+	return filepath.Join(d.Parent.Path(), d.Name)
 }
 
 func (d *FileData) Size() int64 {
@@ -62,20 +79,56 @@ func (d *FileData) UpdateParentSizes(delta int64) {
 }
 
 // FindByPath efficiently searches for a node with the given path.
-// Optimized to O(depth) instead of O(total files) by only descending into
-// children that are on the path to the target.
 func (d *FileData) FindByPath(targetPath string) *FileData {
-	if d.Path() == targetPath {
+	myPath := d.Path()
+	if myPath == targetPath {
 		return d
 	}
 
-	// Only recurse into child if it's on the path to target
-	// We append "/" to both paths to ensure exact path component matching:
-	// - "/tmp/test/" is a prefix of "/tmp/test/folder/" ✓
-	// - "/tmp/test/" is NOT a prefix of "/tmp/test123/" ✗
+	// Clean paths to ensure consistent comparison
+	targetPath = filepath.Clean(targetPath)
+	myPath = filepath.Clean(myPath)
+
+	// If I am not a prefix of target, then target is not in my subtree
+	if !strings.HasPrefix(targetPath, myPath) {
+		return nil
+	}
+
+	// This assumes standard path separator '/' or '\'
+	// Extract the relative path part
+	relPath := ""
+	if myPath == "/" || myPath == "\\" || strings.HasSuffix(myPath, string(filepath.Separator)) {
+		relPath = strings.TrimPrefix(targetPath, myPath)
+	} else {
+		relPath = strings.TrimPrefix(targetPath, myPath+string(filepath.Separator))
+	}
+
+	// Get the first component of the relative path
+	parts := strings.Split(relPath, string(filepath.Separator))
+	if len(parts) == 0 {
+		return nil
+	}
+	nextName := parts[0]
+
 	for _, child := range d.Children {
-		if strings.HasPrefix(targetPath+"/", child.Path()+"/") {
+		if child.Name == nextName {
+			if len(parts) == 1 {
+				return child
+			}
 			return child.FindByPath(targetPath)
+		}
+	}
+	return nil
+}
+
+// FindByID recursively searches for a node with the given ID
+func (d *FileData) FindByID(id string) *FileData {
+	if d.ID == id {
+		return d
+	}
+	for _, child := range d.Children {
+		if found := child.FindByID(id); found != nil {
+			return found
 		}
 	}
 	return nil

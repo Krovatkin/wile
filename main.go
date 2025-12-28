@@ -26,6 +26,7 @@ import (
 	"github.com/gofiber/fiber/v2/middleware/adaptor"
 	"github.com/gofiber/fiber/v2/middleware/cors"
 	"github.com/gofiber/websocket/v2"
+	"github.com/google/uuid"
 	"github.com/otiai10/copy"
 	"github.com/tus/tusd/pkg/filestore"
 	"github.com/tus/tusd/pkg/handler"
@@ -159,8 +160,9 @@ func handleManage(c *fiber.Ctx) error {
 			// Find parent node and add new folder node
 			if parent := sizeTreeRoot.FindByPath(destPath); parent != nil {
 				newNode := &scan.FileData{
+					ID:         uuid.New().String(),
+					Name:       folderName,
 					Parent:     parent,
-					Dir:        newFolderPath,
 					IsDir:      true,
 					IsLink:     false,
 					CachedSize: 0, // Empty folder
@@ -278,7 +280,7 @@ func handleManage(c *fiber.Ctx) error {
 
 					// Update bolt database: delete node and update all parents (still holding sizeTreeMutex)
 					if boltDB != nil {
-						err := deleteNodePathInBolt(boltDB, srcPath)
+						err := deleteNodeIDInBolt(boltDB, nodeToDelete.ID)
 						if err != nil {
 							log.Printf("Warning: Failed to delete from bolt db: %v", err)
 						}
@@ -345,8 +347,9 @@ func handleManage(c *fiber.Ctx) error {
 								}
 
 								newNode = &scan.FileData{
+									ID:         uuid.New().String(),
+									Name:       newInfo.Name(),
 									Parent:     parent,
-									Dir:        targetPath,
 									IsDir:      true,
 									Children:   children,
 									CachedSize: -1, // Force recalc
@@ -358,8 +361,9 @@ func handleManage(c *fiber.Ctx) error {
 							} else {
 								// File
 								newNode = &scan.FileData{
+									ID:         uuid.New().String(),
+									Name:       newInfo.Name(),
 									Parent:     parent,
-									Dir:        targetPath,
 									IsDir:      false,
 									CachedSize: newInfo.Size(),
 								}
@@ -418,34 +422,59 @@ func handleManage(c *fiber.Ctx) error {
 						// Add to new location
 						newParentPath := filepath.Dir(targetPath)
 						if newParent := sizeTreeRoot.FindByPath(newParentPath); newParent != nil {
+							// Update Structure (O(1) in graph)
 							oldNode.Parent = newParent
+							// Update Name (in case it was a move-rename, though purely move keeps name)
+							// But wait, 'paste' targetPath includes the name.
+							// If srcPath=/a/b, targetPath=/x/y/b. Name is same.
+							// The 'move' function does the FS move.
+
 							newParent.Children = append(newParent.Children, oldNode)
 							oldNode.UpdateParentSizes(size)
-							// Update the path after move
-							oldNode.Dir = targetPath
+							// Dir update not needed anymore as path is dynamic!
 
-							// Update bolt database: delete old path, save new path, update parents (still holding sizeTreeMutex)
+							// Update bolt database:
+							// 1. Remove from old parent (implied by graph structure change? No, we store relations.)
+							// Actually, Bolt stores Node -> ParentID.
+							// So we just need to save the MOVED NODE (it has new ParentID).
+							// And we need to save the OLD PARENT (now has fewer children) - wait, children list is in parent?
+							// scan/storage.go: StoredFileData has `ChildIDs []string`.
+							// So we MUST save: OldParent, NewParent, and Node.
+
 							if boltDB != nil {
-								err := deleteNodePathInBolt(boltDB, srcPath)
-								if err != nil {
-									log.Printf("Warning: Failed to delete old path from bolt db: %v", err)
+								// Update Old Parent (to remove child ID)
+								if oldParent != nil {
+									err := updateNodeInBolt(boltDB, oldParent)
+									if err != nil {
+										log.Printf("Warning: Failed to update old parent in bolt: %v", err)
+									}
 								}
+								// Update New Parent (to add child ID)
+								err := updateNodeInBolt(boltDB, newParent)
+								if err != nil {
+									log.Printf("Warning: Failed to update new parent in bolt: %v", err)
+								}
+								// Update Node (to update ParentID)
 								err = updateNodeInBolt(boltDB, oldNode)
 								if err != nil {
-									log.Printf("Warning: Failed to update moved node in bolt db: %v", err)
+									log.Printf("Warning: Failed to update moved node in bolt: %v", err)
 								}
+
+								// Update cumulative sizes up the tree?
+								// Sizes are stored in nodes. We updated in-memory sizes.
+								// So we should save the ancestry to persist size changes?
+								// Technically yes, if we want size persistence.
 								// Update old parent chain
 								for p := oldParent; p != nil; p = p.Parent {
-									err := updateNodeInBolt(boltDB, p)
-									if err != nil {
-										log.Printf("Warning: Failed to update old parent in bolt db: %v", err)
+									// Best effort, skip if already saved above (oldParent)
+									if p != oldParent {
+										updateNodeInBolt(boltDB, p)
 									}
 								}
 								// Update new parent chain
 								for p := newParent; p != nil; p = p.Parent {
-									err := updateNodeInBolt(boltDB, p)
-									if err != nil {
-										log.Printf("Warning: Failed to update new parent in bolt db: %v", err)
+									if p != newParent {
+										updateNodeInBolt(boltDB, p)
 									}
 								}
 							}
@@ -772,13 +801,17 @@ func saveNodeToBolt(bucket *bolt.Bucket, node *scan.FileData) error {
 		return fmt.Errorf("failed to marshal node: %w", err)
 	}
 
-	return bucket.Put([]byte(node.Path()), data)
+	// Check if ID is empty? Should not happen if strictly following new logic.
+	if node.ID == "" {
+		return fmt.Errorf("node has no ID: %s", node.Name)
+	}
+	return bucket.Put([]byte(node.ID), data)
 }
 
-// deleteNodeFromBolt deletes a single node from the bolt database
+// deleteNodeFromBolt deletes a single node from the bolt database by ID
 // Must be called within a bolt transaction
-func deleteNodeFromBolt(bucket *bolt.Bucket, path string) error {
-	return bucket.Delete([]byte(path))
+func deleteNodeFromBolt(bucket *bolt.Bucket, id string) error {
+	return bucket.Delete([]byte(id))
 }
 
 // updateNodeInBolt updates a single node in the database
@@ -789,11 +822,11 @@ func updateNodeInBolt(db *bolt.DB, node *scan.FileData) error {
 	})
 }
 
-// deleteNodePathInBolt deletes a node by path from the database
-func deleteNodePathInBolt(db *bolt.DB, path string) error {
+// deleteNodeIDInBolt deletes a node by ID from the database
+func deleteNodeIDInBolt(db *bolt.DB, id string) error {
 	return db.Update(func(tx *bolt.Tx) error {
 		bucket := tx.Bucket([]byte("sizes"))
-		return deleteNodeFromBolt(bucket, path)
+		return deleteNodeFromBolt(bucket, id)
 	})
 }
 
@@ -863,7 +896,12 @@ func buildSizeTree(rootPath string) error {
 	}
 
 	// Create root node with children
-	sizeTreeRoot = &scan.FileData{Dir: rootPath}
+	sizeTreeRoot = &scan.FileData{
+		ID:       uuid.New().String(),
+		Name:     filepath.Base(rootPath),
+		RootPath: rootPath,
+		IsDir:    true,
+	}
 	sizeTreeRoot.Children = children
 
 	// Compute all sizes eagerly by calling Size() on root
@@ -1386,17 +1424,19 @@ func handleRename(c *fiber.Ctx) error {
 	if withSizes && sizeTreeRoot != nil {
 		sizeTreeMutex.Lock()
 		if node := sizeTreeRoot.FindByPath(oldPath); node != nil {
-			// Update Dir field with new path
-			node.Dir = newPath
+			// Update Name field
+			node.Name = req.NewName
+			// Path is dynamic, so node.Path() will now return newPath automatically.
 
-			// Update bolt database: delete old path, save new path (still holding sizeTreeMutex)
+			// Update bolt database:
+			// ID is constant. Just save the node with new name.
+			// ALSO need to save the PARENT because it contains the list of child IDs (which hasn't changed),
+			// BUT if we store Name in Parent's child list (we don't, we store IDs), then parent update might not be needed?
+			// scan/storage.go `StoredFileData` has `ChildIDs`. It doesn't duplicate names there.
+			// So technically only the Node needs update in DB.
+
 			if boltDB != nil {
-				err := deleteNodePathInBolt(boltDB, oldPath)
-				if err != nil {
-					log.Printf("Warning: Failed to delete old path from bolt db: %v", err)
-				}
-				err = updateNodeInBolt(boltDB, node)
-				if err != nil {
+				if err := updateNodeInBolt(boltDB, node); err != nil {
 					log.Printf("Warning: Failed to update renamed node in bolt db: %v", err)
 				}
 			}

@@ -44,7 +44,7 @@ func TestScanDirConcurrent(t *testing.T) {
 	// Find the subdir and check its size
 	var subdir *FileData
 	for _, child := range children {
-		if child.IsDir && filepath.Base(child.Dir) == "subdir" {
+		if child.IsDir && child.Name == "subdir" {
 			subdir = child
 			break
 		}
