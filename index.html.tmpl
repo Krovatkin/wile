@@ -62,33 +62,43 @@
                 📁 <span id="currentPath">/</span>
             </div>
             <div class="px-4 pb-4 flex flex-col flex-1 overflow-hidden">
-                <!-- Column Headers -->
-                <div class="bg-base-100 rounded-t-box px-4 py-2 border-b border-gray-200">
-                    <div class="grid grid-cols-[1fr_auto_auto_auto] gap-4 items-center w-full">
-                        <button class="flex items-center gap-1 text-sm font-semibold text-gray-600 hover:text-gray-900 text-left" onclick="sortBy('name')">
-                            Name
-                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16V4m0 0L3 8m4-4l4 4m6 0v12m0 0l4-4m-4 4l-4-4"></path>
-                            </svg>
-                        </button>
-                        <button class="text-sm font-semibold text-gray-600 hover:text-gray-900 whitespace-nowrap w-32 text-right" onclick="sortBy('modified')">
-                            Modified
-                            <svg class="w-4 h-4 inline-block" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16V4m0 0L3 8m4-4l4 4m6 0v12m0 0l4-4m-4 4l-4-4"></path>
-                            </svg>
-                        </button>
-                        <button class="text-sm font-semibold text-gray-600 hover:text-gray-900 whitespace-nowrap w-20 text-right" onclick="sortBy('size')">
-                            Size
-                            <svg class="w-4 h-4 inline-block" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16V4m0 0L3 8m4-4l4 4m6 0v12m0 0l4-4m-4 4l-4-4"></path>
-                            </svg>
-                        </button>
-                        <div style="width: 36px;"></div>
-                    </div>
+                <!-- File List Table -->
+                <div class="flex-1 overflow-y-auto bg-base-100 rounded-box border border-gray-200">
+                    <table class="table table-pin-rows table-md w-full">
+                        <thead>
+                            <tr>
+                                <th class="bg-base-200 cursor-pointer hover:bg-base-300 transition-colors" onclick="sortBy('name')">
+                                    <div class="flex items-center gap-1 text-gray-700">
+                                        Name
+                                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16V4m0 0L3 8m4-4l4 4m6 0v12m0 0l4-4m-4 4l-4-4"></path>
+                                        </svg>
+                                    </div>
+                                </th>
+                                <th class="bg-base-200 cursor-pointer hover:bg-base-300 transition-colors w-52" onclick="sortBy('modified')">
+                                    <div class="flex items-center gap-1 text-gray-700">
+                                        Modified
+                                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16V4m0 0L3 8m4-4l4 4m6 0v12m0 0l4-4m-4 4l-4-4"></path>
+                                        </svg>
+                                    </div>
+                                </th>
+                                <th class="bg-base-200 cursor-pointer hover:bg-base-300 transition-colors w-24" onclick="sortBy('size')">
+                                    <div class="flex items-center gap-1 text-gray-700">
+                                        Size
+                                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16V4m0 0L3 8m4-4l4 4m6 0v12m0 0l4-4m-4 4l-4-4"></path>
+                                        </svg>
+                                    </div>
+                                </th>
+                                <th class="bg-base-200 w-24"><!-- Actions --></th>
+                            </tr>
+                        </thead>
+                        <tbody id="fileList">
+                            <!-- Content will be populated by WebSocket -->
+                        </tbody>
+                    </table>
                 </div>
-                <ul class="menu bg-base-100 rounded-b-box p-2 overflow-y-auto flex-1" id="fileList">
-                    <!-- Content will be populated by WebSocket -->
-                </ul>
 
                 <!-- Upload Dropzone -->
                 <div id="uploadDropzone" class="mt-2 border-2 border-dashed border-gray-300 rounded-lg bg-gray-50 flex items-center justify-center text-gray-500 text-sm" style="min-height: 48px; max-height: 48px;">
@@ -265,14 +275,22 @@
             // Add warning emoji if size data is stale
             const sizeDisplay = sizeStale ? `⚠️ ${formattedSize}` : formattedSize;
 
-            // Download button (only for folders)
+            // Download button
             const downloadButton = isDir ? `
                 <button onclick="downloadFolder('${path.replace(/'/g, "\\'")}', event)"
                         class="p-1 hover:bg-blue-100 rounded"
                         title="Download folder as ZIP">
                     ${ICONS.download}
                 </button>
-            ` : '';
+            ` : `
+                <a href="/?path=${encodeURIComponent(path)}" 
+                   download="${name}"
+                   onclick="event.stopPropagation()"
+                   class="p-1 hover:bg-blue-100 rounded flex items-center justify-center text-blue-600"
+                   title="Download file">
+                    ${ICONS.download}
+                </a>
+            `;
 
             const renameButton = `
                 <button onclick="renameItem('${path.replace(/'/g, "\\'")}', '${name.replace(/'/g, "\\'")}', event)"
@@ -290,26 +308,38 @@
                 </button>
             `;
 
+            // Merge default classes with any classes passed in attributes
+            // This prevents duplicate class attributes which browsers ignore
+            const defaultClasses = "hover group cursor-pointer border-b border-base-200";
+            let finalAttributes = attributes || '';
+            if (finalAttributes.includes('class="')) {
+                finalAttributes = finalAttributes.replace('class="', `class="${defaultClasses} `);
+            } else {
+                finalAttributes += ` class="${defaultClasses}"`;
+            }
+
             return `
-                <li ${attributes} class="cursor-pointer" title="${name}">
-                    <div class="grid grid-cols-[1fr_auto_auto_auto] gap-4 items-center w-full">
-                        <div class="flex items-center gap-2 min-w-0 overflow-hidden">
-                            ${icon}
-                            <span class="truncate">${name}</span>
+                <tr ${finalAttributes} title="${name}">
+                    <td>
+                        <div class="flex items-center gap-2 min-w-0">
+                            <span class="flex-shrink-0">${icon}</span>
+                            <span class="truncate font-medium text-gray-700">${name}</span>
                         </div>
-                        <div class="text-sm text-gray-500 whitespace-nowrap w-32 text-right">
-                            ${formattedDate}
-                        </div>
-                        <div class="text-sm text-gray-500 whitespace-nowrap w-20 text-right">
-                            ${sizeDisplay}
-                        </div>
-                        <div class="flex gap-1">
+                    </td>
+                    <td class="text-sm text-gray-500 whitespace-nowrap">
+                        ${formattedDate}
+                    </td>
+                    <td class="text-sm text-gray-500 whitespace-nowrap font-mono">
+                        ${sizeDisplay}
+                    </td>
+                    <td>
+                        <div class="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                             ${downloadButton}
                             ${renameButton}
                             ${deleteButton}
                         </div>
-                    </div>
-                </li>
+                    </td>
+                </tr>
             `;
         }
 
