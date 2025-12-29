@@ -862,24 +862,43 @@ func loadSizeTreeFromBolt(db *bolt.DB, rootPath string) (*scan.FileData, error) 
 
 // saveSizeTreeToBolt saves the entire size tree to bolt database
 func saveSizeTreeToBolt(db *bolt.DB, root *scan.FileData) error {
+	// 1. Flatten the tree first
+	log.Println("=== OPTIMIZED SAVE: Flattening size tree... ===")
+	nodes := make([]*scan.FileData, 0, 100000) // Pre-allocate decent size
+	var flatten func(*scan.FileData)
+	flatten = func(node *scan.FileData) {
+		nodes = append(nodes, node)
+		for _, child := range node.Children {
+			flatten(child)
+		}
+	}
+	flatten(root)
+
+	// 2. Sort nodes by ID to ensure sequential writes to BoltDB (B+Tree optimization)
+	totalNodes := len(nodes)
+	log.Printf("=== OPTIMIZED SAVE: Sorting %d nodes by ID... ===", totalNodes)
+	startSort := time.Now()
+	sort.Slice(nodes, func(i, j int) bool {
+		return nodes[i].ID < nodes[j].ID
+	})
+	log.Printf("=== OPTIMIZED SAVE: Sort completed in %v ===", time.Since(startSort))
+
+	log.Printf("Saving %d nodes to database (sequential ID order)...", totalNodes)
+
+	// 3. Save all in one transaction (User preference: no batching)
 	return db.Update(func(tx *bolt.Tx) error {
 		bucket := tx.Bucket([]byte("sizes"))
 
-		// Recursively save all nodes
-		var saveRecursive func(*scan.FileData) error
-		saveRecursive = func(node *scan.FileData) error {
-			if err := saveNodeToBolt(bucket, node); err != nil {
-				return err
-			}
-			for _, child := range node.Children {
-				if err := saveRecursive(child); err != nil {
-					return err
-				}
-			}
-			return nil
-		}
+		// Fill Percent can be optimized for sequential writes if needed,
+		// but default behavior with sorted keys is already append-like.
+		bucket.FillPercent = 0.9 // High fill percent for bulk load
 
-		return saveRecursive(root)
+		for i, node := range nodes {
+			if err := saveNodeToBolt(bucket, node); err != nil {
+				return fmt.Errorf("failed to save node %d/%d: %w", i, totalNodes, err)
+			}
+		}
+		return nil
 	})
 }
 
