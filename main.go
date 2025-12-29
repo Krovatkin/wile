@@ -989,9 +989,13 @@ func main() {
 		// Try to load existing tree from database
 		log.Println("Loading size tree from bbolt database...")
 		loadedRoot, err := loadSizeTreeFromBolt(boltDB, rootPath)
-		if err != nil {
+		if err != nil || loadedRoot == nil {
 			// Database might be empty on first run
-			log.Printf("Could not load from database (might be first run): %v", err)
+			if err != nil {
+				log.Printf("Could not load from database: %v", err)
+			} else {
+				log.Println("Database is empty or contains no root for this path")
+			}
 			log.Println("Computing directory sizes...")
 			err = buildSizeTree(rootPath)
 			if err != nil {
