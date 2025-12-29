@@ -507,6 +507,7 @@ type FileItem struct {
 	Path      string `json:"path"`      // Relative path for navigation/actions
 	IsDir     bool   `json:"isDir"`     // Whether this is a directory
 	Size      int64  `json:"size"`      // -1 when --with-sizes not used
+	Modified  int64  `json:"modified"`  // Modification time
 	SizeStale bool   `json:"sizeStale"` // True if size data may be invalid
 }
 
@@ -1641,6 +1642,10 @@ func getDirectoryListing(relativePath, sortBy, dir string) []FileItem {
 			sizeTreeMutex.RLock()
 			if fileData := sizeTreeRoot.FindByPath(itemFullPath); fileData != nil {
 				size = fileData.Size()
+				// Use modified time from tree if available (should match fs)
+				// But we get it fresh from os.DirEntry via Info below usually?
+				// Actually ReadDir gives DirEntry. Info() gives ModTime.
+				// We do that below anyway.
 			} else {
 				// Item exists on filesystem but not in tree (new file/folder added)
 				sizeStale = true
@@ -1648,11 +1653,18 @@ func getDirectoryListing(relativePath, sortBy, dir string) []FileItem {
 			sizeTreeMutex.RUnlock()
 		}
 
+		// Get ModTime
+		var modTime int64
+		if info, err := entry.Info(); err == nil {
+			modTime = info.ModTime().Unix()
+		}
+
 		item := FileItem{
 			Name:      entry.Name(),
 			Path:      itemRelativePath,
 			IsDir:     entry.IsDir(),
 			Size:      size,
+			Modified:  modTime,
 			SizeStale: sizeStale,
 		}
 
@@ -1671,6 +1683,8 @@ func getDirectoryListing(relativePath, sortBy, dir string) []FileItem {
 			switch sortBy {
 			case "size":
 				result = items[i].Size < items[j].Size
+			case "modified":
+				result = items[i].Modified < items[j].Modified
 			default: // default to name sorting
 				result = strings.ToLower(items[i].Name) < strings.ToLower(items[j].Name)
 			}

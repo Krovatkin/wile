@@ -76,6 +76,8 @@ func scanDir(parent *FileData, ch chan *FileData, closeWait *sync.WaitGroup, spi
 		isLink := entry.Type()&fs.ModeSymlink != 0
 
 		var size int64 = -1
+		var modified int64 = 0
+
 		if !isDir && !isLink {
 			// Only stat regular files to get size
 			info, err := entry.Info()
@@ -84,9 +86,16 @@ func scanDir(parent *FileData, ch chan *FileData, closeWait *sync.WaitGroup, spi
 				continue
 			}
 			size = info.Size()
+			modified = info.ModTime().Unix()
+		} else {
+			// For dirs/links, we might still want mod time if available cheaply
+			info, err := entry.Info()
+			if err == nil {
+				modified = info.ModTime().Unix()
+			}
 		}
 
-		f := newFileData(parent, entry.Name(), isDir, isLink, size)
+		f := newFileData(parent, entry.Name(), isDir, isLink, size, modified)
 		go func() {
 			ch <- f
 		}()

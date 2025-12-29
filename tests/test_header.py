@@ -41,12 +41,14 @@ with sync_playwright() as p:
     else:
         print("   ✗ Modified column header not found")
 
-    # Check Actions label
-    actions_div = page.locator('div:has-text("Actions")').first
-    if actions_div.is_visible():
-        print("   ✓ Actions column label found")
+    # Check Size button
+    size_button = page.locator('button:has-text("Size")').first
+    if size_button.is_visible():
+        print("   ✓ Size column header found")
     else:
-        print("   ✗ Actions column label not found")
+        print("   ✗ Size column header not found")
+
+    # Actions column is now an icon/empty space, skipping text check
 
     # Test clicking Name button
     print()
@@ -61,6 +63,13 @@ with sync_playwright() as p:
     page.click('button:has-text("Modified")')
     time.sleep(0.5)
     print("   ✓ Modified button clicked (check console for 'Sort by: modified')")
+
+    # Test clicking Size button
+    print()
+    print("5. Testing Size sort button...")
+    page.click('button:has-text("Size")')
+    time.sleep(0.5)
+    print("   ✓ Size button clicked (check console for 'Sort by: size')")
 
     # Take screenshot
     print()

@@ -64,14 +64,20 @@
             <div class="px-4 pb-4 flex flex-col flex-1 overflow-hidden">
                 <!-- Column Headers -->
                 <div class="bg-base-100 rounded-t-box px-4 py-2 border-b border-gray-200">
-                    <div class="grid grid-cols-[1fr_auto_auto] gap-2 items-center w-full">
+                    <div class="grid grid-cols-[1fr_auto_auto_auto] gap-4 items-center w-full">
                         <button class="flex items-center gap-1 text-sm font-semibold text-gray-600 hover:text-gray-900 text-left" onclick="sortBy('name')">
                             Name
                             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16V4m0 0L3 8m4-4l4 4m6 0v12m0 0l4-4m-4 4l-4-4"></path>
                             </svg>
                         </button>
-                        <button class="text-sm font-semibold text-gray-600 hover:text-gray-900 whitespace-nowrap" onclick="sortBy('size')">
+                        <button class="text-sm font-semibold text-gray-600 hover:text-gray-900 whitespace-nowrap w-32 text-right" onclick="sortBy('modified')">
+                            Modified
+                            <svg class="w-4 h-4 inline-block" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16V4m0 0L3 8m4-4l4 4m6 0v12m0 0l4-4m-4 4l-4-4"></path>
+                            </svg>
+                        </button>
+                        <button class="text-sm font-semibold text-gray-600 hover:text-gray-900 whitespace-nowrap w-20 text-right" onclick="sortBy('size')">
                             Size
                             <svg class="w-4 h-4 inline-block" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16V4m0 0L3 8m4-4l4 4m6 0v12m0 0l4-4m-4 4l-4-4"></path>
@@ -234,7 +240,7 @@
 
         // Helper function to create file/folder item with delete button
         function createItemHTML(entryObj, attributes, icon) {
-            const { name, path, isDir, size, sizeStale } = entryObj;
+            const { name, path, isDir, size, modified, sizeStale } = entryObj;
 
             // Format size to human-readable format
             const formatSize = (bytes) => {
@@ -247,6 +253,14 @@
             };
 
             const formattedSize = formatSize(size);
+            
+            // Format date
+            const formatDate = (timestamp) => {
+                if (!timestamp) return '-';
+                const date = new Date(timestamp * 1000);
+                return date.toLocaleString();
+            };
+            const formattedDate = formatDate(modified);
 
             // Add warning emoji if size data is stale
             const sizeDisplay = sizeStale ? `⚠️ ${formattedSize}` : formattedSize;
@@ -278,12 +292,15 @@
 
             return `
                 <li ${attributes} class="cursor-pointer" title="${name}">
-                    <div class="grid grid-cols-[1fr_auto_auto] gap-2 items-center w-full">
+                    <div class="grid grid-cols-[1fr_auto_auto_auto] gap-4 items-center w-full">
                         <div class="flex items-center gap-2 min-w-0 overflow-hidden">
                             ${icon}
                             <span class="truncate">${name}</span>
                         </div>
-                        <div class="text-sm text-gray-500 whitespace-nowrap">
+                        <div class="text-sm text-gray-500 whitespace-nowrap w-32 text-right">
+                            ${formattedDate}
+                        </div>
+                        <div class="text-sm text-gray-500 whitespace-nowrap w-20 text-right">
                             ${sizeDisplay}
                         </div>
                         <div class="flex gap-1">

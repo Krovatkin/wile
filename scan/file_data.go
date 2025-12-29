@@ -14,9 +14,11 @@ type FileData struct {
 	Children []*FileData `json:"children,omitempty"`
 
 	// Metadata
-	IsDir      bool  `json:"isDir"`
-	IsLink     bool  `json:"isLink"`
+	IsDir  bool `json:"isDir"`
+	IsLink bool `json:"isLink"`
+
 	CachedSize int64 `json:"size"`
+	Modified   int64 `json:"modified"`
 
 	// Root specific
 	RootPath string `json:"-"`
@@ -28,11 +30,12 @@ func newRootFileData(dir string) *FileData {
 		Name:       filepath.Base(dir),
 		IsDir:      true,
 		CachedSize: 0,
+		Modified:   0, // Root doesn't really have a modified time usually, or set to now
 		RootPath:   dir,
 	}
 }
 
-func newFileData(parent *FileData, name string, isDir bool, isLink bool, size int64) *FileData {
+func newFileData(parent *FileData, name string, isDir bool, isLink bool, size int64, modified int64) *FileData {
 	return &FileData{
 		ID:         uuid.New().String(),
 		Name:       name,
@@ -40,6 +43,7 @@ func newFileData(parent *FileData, name string, isDir bool, isLink bool, size in
 		IsDir:      isDir,
 		IsLink:     isLink,
 		CachedSize: size,
+		Modified:   modified,
 	}
 }
 

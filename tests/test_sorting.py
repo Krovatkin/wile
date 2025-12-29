@@ -59,6 +59,16 @@ with sync_playwright() as p:
     page.click('button:has-text("Modified")')
     time.sleep(1)
 
+    # Click Size button (should switch to size asc)
+    print("\n7. Clicking Size button (should switch to size asc)...")
+    page.click('button:has-text("Size")')
+    time.sleep(1)
+
+    # Click Size button again (should toggle to desc)
+    print("\n8. Clicking Size button again (should toggle to desc)...")
+    page.click('button:has-text("Size")')
+    time.sleep(1)
+
     # Take final screenshot
     print("\n7. Taking screenshot...")
     page.screenshot(path='test_sorting.png', full_page=True)
