@@ -43,8 +43,8 @@ func (f *FileData) ToStored() *StoredFileData {
 	}
 }
 
-// MarshalBinary encodes StoredFileData using gob
-func (s *StoredFileData) MarshalBinary() ([]byte, error) {
+// Serialize encodes StoredFileData using gob
+func (s *StoredFileData) Serialize() ([]byte, error) {
 	var buf bytes.Buffer
 	enc := gob.NewEncoder(&buf)
 	if err := enc.Encode(s); err != nil {
@@ -53,8 +53,8 @@ func (s *StoredFileData) MarshalBinary() ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
-// UnmarshalBinary decodes StoredFileData from gob
-func (s *StoredFileData) UnmarshalBinary(data []byte) error {
+// Deserialize decodes StoredFileData from gob
+func (s *StoredFileData) Deserialize(data []byte) error {
 	dec := gob.NewDecoder(bytes.NewReader(data))
 	return dec.Decode(s)
 }

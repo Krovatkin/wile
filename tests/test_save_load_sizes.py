@@ -14,7 +14,7 @@ import json
 import signal
 
 TEST_DIR = "/tmp/wile_save_test"
-WILE_BIN = "/Users/nikolayk/github/wile/wile"
+WILE_BIN = "./wile"
 SIZES_JSON = os.path.join(TEST_DIR, "sizes.json")
 
 def setup():
@@ -172,6 +172,67 @@ def test_scenario_3():
     print("\n✅ SCENARIO 3 PASSED")
     return True
 
+def test_scenario_4():
+    """
+    Scenario 4: BoltDB Save and Load
+    """
+    print("\n" + "="*70)
+    print("SCENARIO 4: BoltDB Save and Load")
+    print("="*70)
+
+    db_path = os.path.join(TEST_DIR, "sizes.db")
+    if os.path.exists(db_path):
+        os.remove(db_path)
+
+    # Start server with --sizes-db
+    print("\n1. Starting server with --sizes-db...")
+    cmd = [WILE_BIN, "--path", TEST_DIR, "--port", "9097", "--sizes-db", db_path, "--write", "--modifications-log", os.path.join(TEST_DIR, "modifications.jsonl")]
+    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    time.sleep(3)
+
+    # Send Ctrl+C to trigger save (though BoltDB saves incrementally, initial full save happens on scan completion)
+    print("2. Sending Ctrl+C (SIGINT)...")
+    proc.send_signal(signal.SIGINT)
+    proc.wait(timeout=5)
+
+    if not os.path.exists(db_path):
+        print("   ❌ FAILED: sizes.db not created")
+        return False
+    
+    file_size = os.path.getsize(db_path)
+    print(f"   ✓ sizes.db created ({file_size} bytes)")
+    if file_size == 0:
+        print("   ❌ FAILED: db file is empty")
+        return False
+
+    # Start again to verify load
+    print("\n3. Starting server again to verify load from DB...")
+    cmd = [WILE_BIN, "--path", TEST_DIR, "--port", "9098", "--sizes-db", db_path, "--write", "--modifications-log", os.path.join(TEST_DIR, "modifications.jsonl")]
+    
+    # We need to capture output to check for "Loading size tree from bbolt database"
+    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, universal_newlines=True)
+    
+    found_load_msg = False
+    start = time.time()
+    while time.time() - start < 5:
+        line = proc.stdout.readline()
+        if not line: break
+        # print(f"   LOG: {line.strip()}") 
+        if "Loading size tree from bbolt database" in line:
+            found_load_msg = True
+            break
+            
+    proc.send_signal(signal.SIGINT)
+    proc.wait()
+
+    if not found_load_msg:
+        print("   ❌ FAILED: Did not find 'Loading size tree from bbolt database' log message")
+        return False
+
+    print("   ✓ Found load log message")
+    print("\n✅ SCENARIO 4 PASSED")
+    return True
+
 def main():
     print("="*70)
     print("WILE SIZE TREE SAVE/LOAD TEST")
@@ -185,6 +246,7 @@ def main():
     results.append(("Scenario 1: Scan & Save", test_scenario_1()))
     results.append(("Scenario 2: Load & Verify", test_scenario_2()))
     results.append(("Scenario 3: Load, Modify, Save", test_scenario_3()))
+    results.append(("Scenario 4: BoltDB Persistence", test_scenario_4()))
 
     # Summary
     print("\n" + "="*70)

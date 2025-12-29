@@ -799,7 +799,7 @@ func openBoltDB(path string) (*bolt.DB, error) {
 // Must be called within a bolt transaction
 func saveNodeToBolt(bucket *bolt.Bucket, node *scan.FileData) error {
 	stored := node.ToStored()
-	data, err := stored.MarshalBinary()
+	data, err := stored.Serialize()
 	if err != nil {
 		return fmt.Errorf("failed to marshal node: %w", err)
 	}
@@ -845,7 +845,7 @@ func loadSizeTreeFromBolt(db *bolt.DB, rootPath string) (*scan.FileData, error) 
 
 		return bucket.ForEach(func(k, v []byte) error {
 			var stored scan.StoredFileData
-			if err := stored.UnmarshalBinary(v); err != nil {
+			if err := stored.Deserialize(v); err != nil {
 				return fmt.Errorf("failed to unmarshal node %s: %w", k, err)
 			}
 			storedNodes[string(k)] = &stored
