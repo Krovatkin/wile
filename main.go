@@ -64,10 +64,12 @@ type ModificationLogEntry struct {
 	Errors    []string `json:"errors,omitempty"` // errors if any
 }
 
+var modificationsLogFile string
+
 // logModification appends a file operation to modifications.jsonl
 // NEVER overwrites the file, only appends
 func logModification(action string, sources []string, dest string, errors []string) {
-	logFilePath := filepath.Join(rootPath, "modifications.jsonl")
+	logFilePath := modificationsLogFile
 
 	// Open file with append mode - creates if doesn't exist, never overwrites
 	f, err := os.OpenFile(logFilePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
@@ -923,8 +925,13 @@ func main() {
 	flag.BoolVar(&withSizes, "with-sizes", false, "Compute and display cumulative directory sizes")
 	flag.StringVar(&sizesFile, "sizes", "", "JSON file for size tree (loads if exists, saves on exit)")
 	flag.StringVar(&sizesDb, "sizes-db", "", "bbolt database for size tree (loads if exists, saves incrementally)")
+	flag.StringVar(&modificationsLogFile, "modifications-log", "", "Path to modifications log file (REQUIRED)")
 	flag.StringVar(&port, "port", "8080", "Port to listen on (default 8080)")
 	flag.Parse()
+
+	if modificationsLogFile == "" {
+		log.Fatal("Error: --modifications-log is required. Please specify a path for the modification log file.")
+	}
 
 	// Validate mutually exclusive flags
 	if withSizes && sizesFile != "" {

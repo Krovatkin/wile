@@ -15,7 +15,7 @@ TEST_DIR = "/Users/nikolayk/github/wile/test_sizes"
 
 def start_wile_server(with_size=True):
     """Start wile server with or without --with-sizes flag"""
-    cmd = [WILE_PATH, "--path", TEST_DIR, "--port", "3000"]
+    cmd = [WILE_PATH, "--path", TEST_DIR, "--port", "3000", "--write", "--modifications-log", os.path.join(TEST_DIR, "modifications.jsonl")]
     if with_size:
         cmd.append("--with-sizes")
 

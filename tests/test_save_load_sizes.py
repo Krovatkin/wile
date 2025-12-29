@@ -49,7 +49,7 @@ def test_scenario_1():
 
     # Start server with --sizes
     print("\n1. Starting server with --sizes...")
-    cmd = [WILE_BIN, "--path", TEST_DIR, "--port", "9095", "--sizes", SIZES_JSON, "--write"]
+    cmd = [WILE_BIN, "--path", TEST_DIR, "--port", "9095", "--sizes", SIZES_JSON, "--write", "--modifications-log", os.path.join(TEST_DIR, "modifications.jsonl")]
     proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     time.sleep(3)
 

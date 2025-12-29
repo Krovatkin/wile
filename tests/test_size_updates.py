@@ -13,7 +13,7 @@ TEST_DIR = "/Users/nikolayk/github/wile/test_sizes"
 
 def start_server():
     """Start wile server with --with-sizes and --write flags"""
-    cmd = [WILE_PATH, "--path", TEST_DIR, "--port", "3000", "--with-sizes", "--write"]
+    cmd = [WILE_PATH, "--path", TEST_DIR, "--port", "3000", "--with-sizes", "--write", "--modifications-log", os.path.join(TEST_DIR, "modifications.jsonl")]
     print(f"Starting wile: {' '.join(cmd)}")
     process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     time.sleep(3)

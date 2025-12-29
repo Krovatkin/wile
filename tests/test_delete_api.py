@@ -5,13 +5,14 @@ Test delete using the proper file operations flow
 from playwright.sync_api import sync_playwright
 import subprocess
 import time
+import os
 
 BASE_URL = "http://localhost:3000"
 WILE_PATH = "/Users/nikolayk/github/wile/wile"
 TEST_DIR = "/Users/nikolayk/github/wile/test_sizes"
 
 def start_server():
-    cmd = [WILE_PATH, "--path", TEST_DIR, "--port", "3000", "--with-sizes", "--write"]
+    cmd = [WILE_PATH, "--path", TEST_DIR, "--port", "3000", "--write", "--modifications-log", os.path.join(TEST_DIR, "modifications.jsonl")]
     print(f"Starting: {' '.join(cmd)}")
     process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     time.sleep(4)

@@ -42,7 +42,7 @@ def setup_test_env():
 
 def start_server():
     """Start wile server"""
-    cmd = [WILE_PATH, "--path", TEST_DIR, "--port", PORT, "--write"]
+    cmd = [WILE_PATH, "--path", TEST_DIR, "--port", PORT, "--write", "--modifications-log", LOG_FILE]
     process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     time.sleep(2)
     return process
