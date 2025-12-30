@@ -425,10 +425,11 @@
 
                     // Update the DOM without navigating
                     // Find the list item by data-path attribute
-                    const li = document.querySelector(`li[data-path="${itemPath}"]`);
-                    if (li) {
+                    // const li = document.querySelector(`li[data-path="${itemPath}"]`);
+                    const tr = document.querySelector(`tr[data-path="${itemPath}"]`);
+                    if (tr) {
                         // Update the displayed name
-                        const nameSpan = li.querySelector('span.truncate');
+                        const nameSpan = tr.querySelector('span.truncate');
                         if (nameSpan) {
                             nameSpan.textContent = newName;
                         }
@@ -439,41 +440,41 @@
                         const escapedOldPath = itemPath.replace(/'/g, "\\'");
 
                         // Update data-path attribute
-                        li.setAttribute('data-path', newPath);
+                        tr.setAttribute('data-path', newPath);
 
-                        // Update the main li onclick
-                        const liOnclick = li.getAttribute('onclick');
-                        if (liOnclick) {
-                            li.setAttribute('onclick', liOnclick.replace(escapedOldPath, escapedNewPath));
+                        // Update the main tr onclick
+                        const trOnclick = tr.getAttribute('onclick');
+                        if (trOnclick) {
+                            tr.setAttribute('onclick', trOnclick.replace(escapedOldPath, escapedNewPath));
                         }
 
                         // Update ondblclick if exists (for folders)
-                        const liOndblclick = li.getAttribute('ondblclick');
-                        if (liOndblclick) {
-                            li.setAttribute('ondblclick', liOndblclick.replace(escapedOldPath, escapedNewPath));
+                        const trOndblclick = tr.getAttribute('ondblclick');
+                        if (trOndblclick) {
+                            tr.setAttribute('ondblclick', trOndblclick.replace(escapedOldPath, escapedNewPath));
                         }
 
                         // Update download button if exists
-                        const downloadBtn = li.querySelector('button[onclick*="downloadFolder"]');
+                        const downloadBtn = tr.querySelector('button[onclick*="downloadFolder"]');
                         if (downloadBtn) {
                             const downloadOnclick = downloadBtn.getAttribute('onclick');
                             downloadBtn.setAttribute('onclick', downloadOnclick.replace(escapedOldPath, escapedNewPath));
                         }
 
                         // Update rename button
-                        const renameBtn = li.querySelector('button[onclick*="renameItem"]');
+                        const renameBtn = tr.querySelector('button[onclick*="renameItem"]');
                         if (renameBtn) {
                             renameBtn.setAttribute('onclick', `renameItem('${escapedNewPath}', '${newName.replace(/'/g, "\\'")}', event)`);
                         }
 
                         // Update delete button
-                        const deleteBtn = li.querySelector('button[onclick*="deleteItem"]');
+                        const deleteBtn = tr.querySelector('button[onclick*="deleteItem"]');
                         if (deleteBtn) {
                             deleteBtn.setAttribute('onclick', `deleteItem('${escapedNewPath}', event)`);
                         }
 
                         // Update title
-                        li.setAttribute('title', newName);
+                        tr.setAttribute('title', newName);
                     }
                 } else {
                     showNotification(data.error || 'Failed to rename', 'error');
@@ -698,16 +699,17 @@
         function toggleFileSelection(element) {
             const itemType = element.dataset.fileType;
             const filePath = element.dataset.path;
-            const parentLi = element.closest('li'); // Get the parent <li>
+            // const parentLi = element.closest('li'); // Get the parent <li>
+            const parentRow = element.closest('tr'); // Get the parent <tr>
 
             if (selected.has(filePath)) {
                 // Remove from selection
                 selected.delete(filePath);
-                parentLi.classList.remove('!bg-blue-200', '!text-white');
+                parentRow.classList.remove('!bg-blue-200', '!text-white');
             } else {
                 // Add to selection
                 selected.add(filePath);
-                parentLi.classList.add('!bg-blue-200', '!text-white');
+                parentRow.classList.add('!bg-blue-200', '!text-white');
             }
             
             console.log('Selected files:', Array.from(selected));
@@ -716,9 +718,9 @@
 
         // Clear selection and update UI
         function clearSelection() {
-            // Clear selection classes from all li elements
-            document.querySelectorAll('li.\\!bg-blue-200').forEach(li => {
-                li.classList.remove('!bg-blue-200', '!text-white');
+            // Clear selection classes from all tr elements
+            document.querySelectorAll('tr.\\!bg-blue-200').forEach(tr => {
+                tr.classList.remove('!bg-blue-200', '!text-white');
             });
             
             // Clear the selection set
