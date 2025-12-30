@@ -492,7 +492,8 @@
                 return; // User cancelled
             }
 
-            const currentPath = getTabs()[activeTabIndex].path;
+            // Use global currentPath
+            // const currentPath = getTabs()[activeTabIndex].path;
             const params = new URLSearchParams();
             params.append('action', 'new_folder');
             params.append('dest', currentPath);
@@ -504,7 +505,7 @@
                     if (data.status === 'ok') {
                         showNotification(`Created folder "${folderName}"`, 'info');
                         // Refresh the current directory
-                        loadDirectory(currentPath);
+                        navigateToFolder(currentPath);
                     } else {
                         showNotification(data.error || 'Failed to create folder', 'error');
                     }
