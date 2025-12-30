@@ -73,7 +73,7 @@ def test_copy_and_cut():
         print("\n1. Navigating back to root...")
         page.goto(BASE_URL)
         page.wait_for_load_state('networkidle')
-        time.sleep(1)
+        time.sleep(2) # Increased from 1s to 2s to prevent timeout
 
         # Test 2: Cut test2.txt and move to folder2
         print("\n2. Selecting test2.txt...")

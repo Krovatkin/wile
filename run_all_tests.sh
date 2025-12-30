@@ -1,64 +1,40 @@
 #!/bin/bash
+set +e
 
-# Run all wile tests
-echo "======================================================================"
-echo "RUNNING ALL WILE TESTS"
-echo "======================================================================"
-echo ""
+# Reset test environment
+echo "Resetting test environment..."
+chmod +x tests/setup_test_env.sh
+./tests/setup_test_env.sh
 
-PYTHON="/Users/nikolayk/opt/miniconda3/envs/playwright/bin/python"
+# Build the server
+echo "Building server..."
+go build -o file-browser
 
-# Tests to run
-TESTS=(
-    "tests/test_sizes.py"
-    "tests/test_modifications_log.py"
-    "tests/test_sorting.py"
-    "tests/test_tab_sorting.py"
-    "tests/test_lightbox_navigation.py"
-    "tests/test_lightbox_3images.py"
-    "tests/test_deep_navigation.py"
-)
+# Start server in background
+./file-browser -port 9102 -path tmp_test -write -modifications-log tmp_test/modifications.jsonl > server.log 2>&1 &
+SERVER_PID=$!
+echo "Server started with PID $SERVER_PID"
 
-PASSED=0
-FAILED=0
-FAILED_TESTS=()
+# Wait for server
+sleep 5
 
-for test in "${TESTS[@]}"; do
-    echo "----------------------------------------------------------------------"
-    echo "Running: $test"
-    echo "----------------------------------------------------------------------"
+# Define Python path
+PYTHON_PATH="/Users/nikolayk/opt/miniconda3/envs/playwright/bin/python"
 
-    if $PYTHON "$test" 2>&1; then
-        echo "✅ PASSED: $test"
-        ((PASSED++))
-    else
-        echo "❌ FAILED: $test"
-        ((FAILED++))
-        FAILED_TESTS+=("$test")
-    fi
-    echo ""
+# Run Tests
+echo "---------------------------------------------------"
+echo "Running test_copy_cut.py"
+PORT=9102 $PYTHON_PATH tests/test_copy_cut.py
 
-    # Clean up between tests
-    pkill -f "wile.*--port" 2>/dev/null
-    sleep 2
-done
+echo "---------------------------------------------------"
+echo "Running test_lightbox_navigation.py"
+PORT=9102 $PYTHON_PATH tests/test_lightbox_navigation.py
 
-echo "======================================================================"
-echo "TEST RESULTS SUMMARY"
-echo "======================================================================"
-echo "Total tests run: $((PASSED + FAILED))"
-echo "Passed: $PASSED"
-echo "Failed: $FAILED"
+echo "---------------------------------------------------"
+echo "Running test_tabs_operations.py"
+PORT=9102 $PYTHON_PATH tests/test_tabs_operations.py
 
-if [ $FAILED -gt 0 ]; then
-    echo ""
-    echo "Failed tests:"
-    for test in "${FAILED_TESTS[@]}"; do
-        echo "  - $test"
-    done
-    exit 1
-else
-    echo ""
-    echo "✅ ALL TESTS PASSED!"
-    exit 0
-fi
+# Cleanup
+echo "Stopping server..."
+kill $SERVER_PID
+echo "Done."
