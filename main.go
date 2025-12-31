@@ -35,7 +35,12 @@ import (
 )
 
 func move(src, dst string) error {
-	// Copy file OR directory to destination
+	// Try atomic rename first (fast moving on same filesystem)
+	if err := os.Rename(src, dst); err == nil {
+		return nil
+	}
+
+	// Fallback: Copy file OR directory to destination
 	if err := copy.Copy(src, dst); err != nil {
 		return err
 	}
@@ -486,6 +491,13 @@ func handleManage(c *fiber.Ctx) error {
 				sizeTreeMutex.Unlock()
 			}
 		}
+	}
+
+	// Log completion to stdout for user visibility
+	if len(errors) == 0 {
+		log.Printf("Successfully completed %s operation on %d items", strings.ToUpper(action), len(srcList))
+	} else {
+		log.Printf("Completed %s operation with %d errors", strings.ToUpper(action), len(errors))
 	}
 
 	// Log the operation to modifications.jsonl
