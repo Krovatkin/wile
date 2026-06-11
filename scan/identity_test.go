@@ -7,10 +7,10 @@ import (
 
 func TestPathReconstruction(t *testing.T) {
 	root := newRootFileData("/root")
-	child1 := newFileData(root, "folder1", true, false, 0)
+	child1 := newFileData(root, "folder1", true, false, 0, 0)
 	root.Children = append(root.Children, child1)
 
-	child2 := newFileData(child1, "file2.txt", false, false, 100)
+	child2 := newFileData(child1, "file2.txt", false, false, 100, 0)
 	child1.Children = append(child1.Children, child2)
 
 	// Verify paths
@@ -35,7 +35,7 @@ func TestIDGeneration(t *testing.T) {
 		t.Error("Root ID is empty")
 	}
 
-	child := newFileData(root, "test", false, false, 0)
+	child := newFileData(root, "test", false, false, 0, 0)
 	if child.ID == "" {
 		t.Error("Child ID is empty")
 	}
@@ -47,10 +47,10 @@ func TestIDGeneration(t *testing.T) {
 
 func TestFindByID(t *testing.T) {
 	root := newRootFileData("/root")
-	child1 := newFileData(root, "c1", true, false, 0)
+	child1 := newFileData(root, "c1", true, false, 0, 0)
 	root.Children = append(root.Children, child1)
 
-	child2 := newFileData(child1, "c2", false, false, 0)
+	child2 := newFileData(child1, "c2", false, false, 0, 0)
 	child1.Children = append(child1.Children, child2)
 
 	// Find Root
