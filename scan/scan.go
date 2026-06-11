@@ -7,9 +7,7 @@ import (
 	"sync"
 )
 
-func ScanDirConcurrent(dir string, concurrency int, spinner *ProgressSpinner) ([]*FileData, error) {
-	root := newRootFileData(dir)
-
+func ScanDirConcurrent(parent *FileData, concurrency int, spinner *ProgressSpinner) error {
 	if concurrency == 0 {
 		concurrency = DefaultConcurrency()
 	}
@@ -32,9 +30,9 @@ func ScanDirConcurrent(dir string, concurrency int, spinner *ProgressSpinner) ([
 		}()
 	}
 
-	err := scanDir(root, ch, closeWait, spinner)
+	err := scanDir(parent, ch, closeWait, spinner)
 	if err != nil {
-		return nil, err
+		return err
 	}
 
 	go func() {
@@ -44,7 +42,7 @@ func ScanDirConcurrent(dir string, concurrency int, spinner *ProgressSpinner) ([
 
 	wait.Wait()
 
-	return root.Children, nil
+	return nil
 }
 
 func DefaultConcurrency() int {

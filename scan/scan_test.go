@@ -31,10 +31,12 @@ func TestScanDirConcurrent(t *testing.T) {
 	}
 
 	// Scan the directory
-	children, err := ScanDirConcurrent(tmpDir, 0, nil)
+	root := newRootFileData(tmpDir)
+	err := ScanDirConcurrent(root, 0, nil)
 	if err != nil {
 		t.Fatalf("ScanDirConcurrent failed: %v", err)
 	}
+	children := root.Children
 
 	// Should have 3 items (2 files + 1 dir)
 	if len(children) != 3 {
@@ -110,10 +112,12 @@ func TestFileDataSize(t *testing.T) {
 	}
 
 	// Scan the directory
-	children, err := ScanDirConcurrent(tmpDir, 1, nil)
+	root := newRootFileData(tmpDir)
+	err := ScanDirConcurrent(root, 1, nil)
 	if err != nil {
 		t.Fatalf("ScanDirConcurrent failed: %v", err)
 	}
+	children := root.Children
 
 	// Calculate total size
 	var totalSize int64

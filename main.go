@@ -386,25 +386,16 @@ func handleManage(c *gin.Context) {
 						if parent != nil {
 							var newNode *scan.FileData
 							if newInfo.IsDir() {
-								// Scan the new directory to build subtree
-								children, err := scan.ScanDirConcurrent(targetPath, 0, nil)
-								if err != nil {
-									log.Printf("Warning: Failed to scan new copy: %v", err)
-									// Create empty placeholder if scan fails
-									children = []*scan.FileData{}
-								}
-
 								newNode = &scan.FileData{
 									ID:         uuid.New().String(),
 									Name:       newInfo.Name(),
 									Parent:     parent,
 									IsDir:      true,
-									Children:   children,
 									CachedSize: -1, // Force recalc
 								}
-								// Fix parent pointers for children
-								for _, child := range children {
-									child.RebuildParentPointers(newNode)
+								if err := scan.ScanDirConcurrent(newNode, 0, nil); err != nil {
+									log.Printf("Warning: Failed to scan new copy: %v", err)
+									newNode.Children = []*scan.FileData{}
 								}
 							} else {
 								// File
@@ -1003,8 +994,16 @@ func buildSizeTree(rootPath string) error {
 	// Create and start progress spinner
 	spinner := scan.NewProgressSpinner()
 
-	// Scan the directory tree
-	children, err := scan.ScanDirConcurrent(rootPath, 0, spinner)
+	// Create root node
+	sizeTreeRoot = &scan.FileData{
+		ID:       uuid.New().String(),
+		Name:     filepath.Base(rootPath),
+		RootPath: rootPath,
+		IsDir:    true,
+	}
+
+	// Scan the directory tree directly into the root
+	err := scan.ScanDirConcurrent(sizeTreeRoot, 0, spinner)
 
 	// Stop spinner regardless of error
 	spinner.Stop()
@@ -1012,15 +1011,6 @@ func buildSizeTree(rootPath string) error {
 	if err != nil {
 		return err
 	}
-
-	// Create root node with children
-	sizeTreeRoot = &scan.FileData{
-		ID:       uuid.New().String(),
-		Name:     filepath.Base(rootPath),
-		RootPath: rootPath,
-		IsDir:    true,
-	}
-	sizeTreeRoot.Children = children
 
 	// Compute all sizes eagerly by calling Size() on root
 	// This recursively computes and caches sizes for all nodes
