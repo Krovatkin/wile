@@ -41,13 +41,13 @@ with sync_playwright() as p:
 
     # Change Tab 1 to sort by Modified desc
     print("\n3. Changing Tab 1 to sort by Modified...")
-    page.click('button:has-text("Modified")')
+    page.click('th:has-text("Modified")')
     time.sleep(1)
     print("   Tab 1 now sorts by Modified asc")
 
     # Toggle to desc
     print("\n4. Toggling Tab 1 to Modified desc...")
-    page.click('button:has-text("Modified")')
+    page.click('th:has-text("Modified")')
     time.sleep(1)
     print("   Tab 1 now sorts by Modified desc")
 
@@ -59,9 +59,9 @@ with sync_playwright() as p:
 
     # Change Tab 2 to Name asc
     print("\n6. Changing Tab 2 to Name asc...")
-    page.click('button:has-text("Name")')
+    page.click('th:has-text("Name")')
     time.sleep(1)
-    page.click('button:has-text("Name")')
+    page.click('th:has-text("Name")')
     time.sleep(1)
     print("   Tab 2 now sorts by Name asc")
 

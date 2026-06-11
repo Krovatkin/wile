@@ -31,8 +31,8 @@ def stop_server(process):
 
 def get_folder_size(page, folder_name):
     """Get the displayed size of a folder"""
-    folder = page.locator(f'li:has(span:text-is("{folder_name}"))').first
-    size_text = folder.locator('.text-sm.text-gray-500').text_content().strip()
+    folder = page.locator(f'tr:has(span:text-is("{folder_name}"))').first
+    size_text = folder.locator('td.font-mono').text_content().strip()
     return size_text
 
 def test_size_updates():
@@ -52,7 +52,7 @@ def test_size_updates():
             print("✓ Page loaded")
 
             # Wait for file list
-            page.wait_for_selector('li[data-file-type]', timeout=10000)
+            page.wait_for_selector('tr[data-file-type]', timeout=10000)
             time.sleep(1)
 
             # Get initial size of folder_A (should be 10 MB)
@@ -61,12 +61,12 @@ def test_size_updates():
 
             # TEST 1: Delete a file and verify parent size decreases
             print("\n--- Test 1: Delete file ---")
-            page.locator('li:has(span:text-is("folder_A"))').first.dblclick()
+            page.locator('tr:has(span:text-is("folder_A"))').first.dblclick()
             time.sleep(2)
             print("  Navigated into folder_A")
 
             # Select file1.bin (5 MB)
-            file1 = page.locator('li:has(span:text-is("file1.bin"))').first
+            file1 = page.locator('tr:has(span:text-is("file1.bin"))').first
             file1.click()
             time.sleep(1)
             print("  Selected file1.bin")
@@ -98,8 +98,8 @@ def test_size_updates():
 
             # TEST 2: Rename a file and verify size unchanged
             print("\n--- Test 2: Rename file ---")
-            tiny_file = page.locator('li:has(span:text-is("tiny.txt"))').first
-            initial_tiny_size = tiny_file.locator('.text-sm.text-gray-500').text_content().strip()
+            tiny_file = page.locator('tr:has(span:text-is("tiny.txt"))').first
+            initial_tiny_size = tiny_file.locator('td.font-mono').text_content().strip()
             print(f"  Initial tiny.txt size: {initial_tiny_size}")
 
             # Click rename button
@@ -114,8 +114,8 @@ def test_size_updates():
             print("  Renamed tiny.txt to renamed_tiny.txt")
 
             # Check size unchanged
-            renamed_file = page.locator('li:has(span:text-is("renamed_tiny.txt"))').first
-            renamed_size = renamed_file.locator('.text-sm.text-gray-500').text_content().strip()
+            renamed_file = page.locator('tr:has(span:text-is("renamed_tiny.txt"))').first
+            renamed_size = renamed_file.locator('td.font-mono').text_content().strip()
             print(f"✓ After rename, size: {renamed_size}")
             print(f"  Expected: same as before ({initial_tiny_size})")
 
@@ -125,10 +125,10 @@ def test_size_updates():
             print(f"  Initial folder_B size: {initial_folder_b_size}")
 
             # Select small.txt (5 KB) and cut it
-            small_file = page.locator('li:has(span:text-is("small.txt"))').first
+            small_file = page.locator('tr:has(span:text-is("small.txt"))').first
             small_file.click()
             time.sleep(1)
-            small_size = small_file.locator('.text-sm.text-gray-500').text_content().strip()
+            small_size = small_file.locator('td.font-mono').text_content().strip()
             print(f"  Selected small.txt ({small_size})")
 
             # Click cut button
@@ -137,7 +137,7 @@ def test_size_updates():
             print("  Cut small.txt")
 
             # Navigate into folder_B
-            page.locator('li:has(span:text-is("folder_B"))').first.dblclick()
+            page.locator('tr:has(span:text-is("folder_B"))').first.dblclick()
             time.sleep(2)
             print("  Navigated into folder_B")
 
@@ -160,10 +160,10 @@ def test_size_updates():
             print("\n--- Test 4: Copy file ---")
 
             # Select medium.txt and copy it
-            medium_file = page.locator('li:has(span:text-is("medium.txt"))').first
+            medium_file = page.locator('tr:has(span:text-is("medium.txt"))').first
             medium_file.click()
             time.sleep(1)
-            medium_size = medium_file.locator('.text-sm.text-gray-500').text_content().strip()
+            medium_size = medium_file.locator('td.font-mono').text_content().strip()
             print(f"  Selected medium.txt ({medium_size})")
 
             # Click copy button
@@ -175,7 +175,7 @@ def test_size_updates():
             print(f"  Current folder_A size: {current_folder_a_size}")
 
             # Navigate into folder_A
-            page.locator('li:has(span:text-is("folder_A"))').first.dblclick()
+            page.locator('tr:has(span:text-is("folder_A"))').first.dblclick()
             time.sleep(2)
             print("  Navigated into folder_A")
 

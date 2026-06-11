@@ -53,12 +53,12 @@ def test_size_with_flag():
             print("✓ Page loaded")
 
             # Check that Size column header exists
-            size_header = page.locator('button:has-text("Size")')
+            size_header = page.locator('th:has-text("Size")')
             expect(size_header).to_be_visible()
             print("✓ Size column header visible")
 
             # Wait for file list to populate
-            page.wait_for_selector('li[data-file-type]', timeout=10000)
+            page.wait_for_selector('tr[data-file-type]', timeout=10000)
             time.sleep(1)
 
             # Check specific file sizes
@@ -72,8 +72,8 @@ def test_size_with_flag():
 
             for filename, expected_size in files_to_check:
                 # Find the file item by name and check its size
-                file_item = page.locator(f'li:has(span:text-is("{filename}"))').first
-                size_text = file_item.locator('.text-sm.text-gray-500').text_content()
+                file_item = page.locator(f'tr:has(span:text-is("{filename}"))').first
+                size_text = file_item.locator('td.font-mono').text_content()
 
                 if size_text == expected_size:
                     print(f"✓ {filename}: {size_text}")
@@ -81,12 +81,12 @@ def test_size_with_flag():
                     print(f"✗ {filename}: expected '{expected_size}', got '{size_text}'")
 
             # Check folder cumulative sizes
-            folder_a = page.locator('li:has(span:text-is("folder_A"))').first
-            folder_a_size = folder_a.locator('.text-sm.text-gray-500').text_content()
+            folder_a = page.locator('tr:has(span:text-is("folder_A"))').first
+            folder_a_size = folder_a.locator('td.font-mono').text_content()
             print(f"✓ folder_A cumulative size: {folder_a_size}")
 
-            folder_b = page.locator('li:has(span:text-is("folder_B"))').first
-            folder_b_size = folder_b.locator('.text-sm.text-gray-500').text_content()
+            folder_b = page.locator('tr:has(span:text-is("folder_B"))').first
+            folder_b_size = folder_b.locator('td.font-mono').text_content()
             print(f"✓ folder_B cumulative size: {folder_b_size}")
 
             # Take screenshot
@@ -117,11 +117,11 @@ def test_size_without_flag():
             print("✓ Page loaded")
 
             # Wait for file list
-            page.wait_for_selector('li[data-file-type]', timeout=10000)
+            page.wait_for_selector('tr[data-file-type]', timeout=10000)
             time.sleep(1)
 
             # Check that all items show "-" for size
-            size_elements = page.locator('.text-sm.text-gray-500').all()
+            size_elements = page.locator('td.font-mono').all()
 
             all_dash = True
             for i, elem in enumerate(size_elements[:5]):  # Check first 5
@@ -161,18 +161,18 @@ def test_size_sorting():
             print("✓ Page loaded")
 
             # Wait for file list
-            page.wait_for_selector('li[data-file-type]', timeout=10000)
+            page.wait_for_selector('tr[data-file-type]', timeout=10000)
             time.sleep(1)
 
             # Click Size header to sort ascending
-            size_header = page.locator('button:has-text("Size")').first
+            size_header = page.locator('th:has-text("Size")').first
             size_header.click()
             time.sleep(2)
 
             print("✓ Clicked Size header (ascending)")
 
             # Get file items (not folders)
-            file_items = page.locator('li[data-file-type="file"]').all()
+            file_items = page.locator('tr[data-file-type="file"]').all()
             file_names = [item.locator('span.truncate').text_content() for item in file_items[:5]]
             print(f"  Files order (asc): {file_names}")
 
@@ -187,12 +187,12 @@ def test_size_sorting():
             print("✓ Clicked Size header (descending)")
 
             # Get file items again
-            file_items = page.locator('li[data-file-type="file"]').all()
+            file_items = page.locator('tr[data-file-type="file"]').all()
             file_names = [item.locator('span.truncate').text_content() for item in file_items[:5]]
             print(f"  Files order (desc): {file_names}")
 
             # Check folder sorting - folder_B (100MB) should be before folder_A (10MB)
-            folder_items = page.locator('li[data-file-type="folder"]').all()
+            folder_items = page.locator('tr[data-file-type="folder"]').all()
             if len(folder_items) >= 2:
                 first_folder = folder_items[0].locator('span.truncate').text_content()
                 second_folder = folder_items[1].locator('span.truncate').text_content()
@@ -231,11 +231,11 @@ def test_cumulative_sizes():
             print("✓ Page loaded at root")
 
             # Wait for file list
-            page.wait_for_selector('li[data-file-type]', timeout=10000)
+            page.wait_for_selector('tr[data-file-type]', timeout=10000)
             time.sleep(1)
 
             # Double-click into folder_B
-            folder_b = page.locator('li:has(span:text-is("folder_B"))').first
+            folder_b = page.locator('tr:has(span:text-is("folder_B"))').first
             folder_b.dblclick()
             time.sleep(2)
 
@@ -246,13 +246,13 @@ def test_cumulative_sizes():
             print(f"  Current path: {current_path}")
 
             # Check subfolder size (should be ~50 MB)
-            subfolder = page.locator('li:has(span:text-is("subfolder"))').first
-            subfolder_size = subfolder.locator('.text-sm.text-gray-500').text_content()
+            subfolder = page.locator('tr:has(span:text-is("subfolder"))').first
+            subfolder_size = subfolder.locator('td.font-mono').text_content()
             print(f"✓ subfolder cumulative size: {subfolder_size}")
 
             # Check file3.bin size
-            file3 = page.locator('li:has(span:text-is("file3.bin"))').first
-            file3_size = file3.locator('.text-sm.text-gray-500').text_content()
+            file3 = page.locator('tr:has(span:text-is("file3.bin"))').first
+            file3_size = file3.locator('td.font-mono').text_content()
             print(f"✓ file3.bin size: {file3_size}")
 
             # Take screenshot
@@ -266,12 +266,12 @@ def test_cumulative_sizes():
             print("✓ Navigated into subfolder")
 
             # Check deep1.bin and deep2.bin (each should be 25 MB)
-            deep1 = page.locator('li:has(span:text-is("deep1.bin"))').first
-            deep1_size = deep1.locator('.text-sm.text-gray-500').text_content()
+            deep1 = page.locator('tr:has(span:text-is("deep1.bin"))').first
+            deep1_size = deep1.locator('td.font-mono').text_content()
             print(f"✓ deep1.bin size: {deep1_size}")
 
-            deep2 = page.locator('li:has(span:text-is("deep2.bin"))').first
-            deep2_size = deep2.locator('.text-sm.text-gray-500').text_content()
+            deep2 = page.locator('tr:has(span:text-is("deep2.bin"))').first
+            deep2_size = deep2.locator('td.font-mono').text_content()
             print(f"✓ deep2.bin size: {deep2_size}")
 
             # Take screenshot
@@ -302,14 +302,14 @@ def test_many_files():
             print("✓ Page loaded")
 
             # Wait for file list
-            page.wait_for_selector('li[data-file-type]', timeout=10000)
+            page.wait_for_selector('tr[data-file-type]', timeout=10000)
             time.sleep(1)
 
             # Double-click into many_files
-            many_files = page.locator('li:has(span:text-is("many_files"))').first
+            many_files = page.locator('tr:has(span:text-is("many_files"))').first
 
             # Check cumulative size of many_files folder
-            many_files_size = many_files.locator('.text-sm.text-gray-500').text_content()
+            many_files_size = many_files.locator('td.font-mono').text_content()
             print(f"✓ many_files cumulative size: {many_files_size}")
 
             many_files.dblclick()
@@ -318,14 +318,14 @@ def test_many_files():
             print("✓ Navigated into many_files")
 
             # Count how many files loaded
-            file_items = page.locator('li[data-file-type="file"]').all()
+            file_items = page.locator('tr[data-file-type="file"]').all()
             print(f"✓ Loaded {len(file_items)} files")
 
             # Check a few file sizes
             if len(file_items) >= 3:
                 for i in range(3):
                     filename = file_items[i].locator('span.truncate').text_content()
-                    filesize = file_items[i].locator('.text-sm.text-gray-500').text_content()
+                    filesize = file_items[i].locator('td.font-mono').text_content()
                     print(f"  {filename}: {filesize}")
 
             # Take screenshot

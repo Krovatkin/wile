@@ -41,32 +41,32 @@ with sync_playwright() as p:
 
     # Click Name button (should toggle to desc)
     print("\n3. Clicking Name button (should toggle to desc)...")
-    page.click('button:has-text("Name")')
+    page.click('th:has-text("Name")')
     time.sleep(1)
 
     # Click Name button again (should toggle back to asc)
     print("\n4. Clicking Name button again (should toggle to asc)...")
-    page.click('button:has-text("Name")')
+    page.click('th:has-text("Name")')
     time.sleep(1)
 
     # Click Modified button (should switch to modified asc)
     print("\n5. Clicking Modified button (should switch to modified asc)...")
-    page.click('button:has-text("Modified")')
+    page.click('th:has-text("Modified")')
     time.sleep(1)
 
     # Click Modified button again (should toggle to desc)
     print("\n6. Clicking Modified button again (should toggle to desc)...")
-    page.click('button:has-text("Modified")')
+    page.click('th:has-text("Modified")')
     time.sleep(1)
 
     # Click Size button (should switch to size asc)
     print("\n7. Clicking Size button (should switch to size asc)...")
-    page.click('button:has-text("Size")')
+    page.click('th:has-text("Size")')
     time.sleep(1)
 
     # Click Size button again (should toggle to desc)
     print("\n8. Clicking Size button again (should toggle to desc)...")
-    page.click('button:has-text("Size")')
+    page.click('th:has-text("Size")')
     time.sleep(1)
 
     # Take final screenshot

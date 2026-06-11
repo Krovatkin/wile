@@ -29,8 +29,8 @@ def stop_server(process):
         time.sleep(1)
 
 def get_folder_size(page, folder_name):
-    folder = page.locator(f'li:has(span:text-is("{folder_name}"))').first
-    size_text = folder.locator('.text-sm.text-gray-500').text_content().strip()
+    folder = page.locator(f'tr:has(span:text-is("{folder_name}"))').first
+    size_text = folder.locator('td.font-mono').text_content().strip()
     return size_text
 
 print("=" * 70)
@@ -49,7 +49,7 @@ try:
 
         print("✓ Page loaded")
 
-        page.wait_for_selector('li[data-file-type]', timeout=10000)
+        page.wait_for_selector('tr[data-file-type]', timeout=10000)
         time.sleep(1)
 
         # Get initial folder_A size
@@ -57,12 +57,12 @@ try:
         print(f"\n1. Initial folder_A size: {initial_size}")
 
         # Navigate into folder_A
-        page.locator('li:has(span:text-is("folder_A"))').first.dblclick()
+        page.locator('tr:has(span:text-is("folder_A"))').first.dblclick()
         time.sleep(2)
         print("2. Navigated into folder_A")
 
         # Select file1.bin
-        file1 = page.locator('li:has(span:text-is("file1.bin"))').first
+        file1 = page.locator('tr:has(span:text-is("file1.bin"))').first
         file1.click()
         time.sleep(1)
         print("3. Selected file1.bin (5 MB)")

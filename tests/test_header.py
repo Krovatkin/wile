@@ -28,21 +28,21 @@ with sync_playwright() as p:
     print("2. Checking for column headers...")
 
     # Check Name button
-    name_button = page.locator('button:has-text("Name")').first
+    name_button = page.locator('th:has-text("Name")').first
     if name_button.is_visible():
         print("   ✓ Name column header found")
     else:
         print("   ✗ Name column header not found")
 
     # Check Modified button
-    modified_button = page.locator('button:has-text("Modified")').first
+    modified_button = page.locator('th:has-text("Modified")').first
     if modified_button.is_visible():
         print("   ✓ Modified column header found")
     else:
         print("   ✗ Modified column header not found")
 
     # Check Size button
-    size_button = page.locator('button:has-text("Size")').first
+    size_button = page.locator('th:has-text("Size")').first
     if size_button.is_visible():
         print("   ✓ Size column header found")
     else:
@@ -53,21 +53,21 @@ with sync_playwright() as p:
     # Test clicking Name button
     print()
     print("3. Testing Name sort button...")
-    page.click('button:has-text("Name")')
+    page.click('th:has-text("Name")')
     time.sleep(0.5)
     print("   ✓ Name button clicked (check console for 'Sort by: name')")
 
     # Test clicking Modified button
     print()
     print("4. Testing Modified sort button...")
-    page.click('button:has-text("Modified")')
+    page.click('th:has-text("Modified")')
     time.sleep(0.5)
     print("   ✓ Modified button clicked (check console for 'Sort by: modified')")
 
     # Test clicking Size button
     print()
     print("5. Testing Size sort button...")
-    page.click('button:has-text("Size")')
+    page.click('th:has-text("Size")')
     time.sleep(0.5)
     print("   ✓ Size button clicked (check console for 'Sort by: size')")
 
