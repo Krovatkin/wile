@@ -2,6 +2,7 @@ package main
 
 import (
 	"archive/zip"
+	"context"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -9,6 +10,7 @@ import (
 	"io"
 	"io/ioutil"
 	"log"
+	"net/http"
 	"net/url"
 	"os"
 	"os/exec"
@@ -22,11 +24,10 @@ import (
 
 	bolt "go.etcd.io/bbolt"
 
-	"github.com/gofiber/fiber/v2"
-	"github.com/gofiber/fiber/v2/middleware/adaptor"
-	"github.com/gofiber/fiber/v2/middleware/cors"
-	"github.com/gofiber/websocket/v2"
+	"github.com/gin-contrib/cors"
+	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	gorillaWs "github.com/gorilla/websocket"
 	"github.com/otiai10/copy"
 	"github.com/tus/tusd/pkg/filestore"
 	"github.com/tus/tusd/pkg/handler"
@@ -47,6 +48,14 @@ func move(src, dst string) error {
 
 	// Remove source file OR directory after successful copy
 	return os.RemoveAll(src)
+}
+
+func safePath(root, userInput string) (string, error) {
+	full := filepath.Join(root, filepath.Clean("/"+userInput))
+	if !strings.HasPrefix(full, root+string(os.PathSeparator)) && full != root {
+		return "", fmt.Errorf("path escapes root: %s", userInput)
+	}
+	return full, nil
 }
 
 type DocumentData struct {
@@ -70,6 +79,11 @@ type ModificationLogEntry struct {
 }
 
 var modificationsLogFile string
+
+var (
+	indexTemplate    *template.Template
+	docViewerTemplate *template.Template
+)
 
 // logModification appends a file operation to modifications.jsonl
 // NEVER overwrites the file, only appends
@@ -104,61 +118,73 @@ func logModification(action string, sources []string, dest string, errors []stri
 	}
 }
 
-func handleManage(c *fiber.Ctx) error {
+func handleManage(c *gin.Context) {
 	// Track this operation for graceful shutdown
 	fileOpsInProgress.Add(1)
 	defer fileOpsInProgress.Done()
 
 	// Add this check at the beginning
 	if !writeMode {
-		return c.Status(403).JSON(fiber.Map{
+		c.JSON(403, gin.H{
 			"status": "error",
 			"error":  "File operations are disabled. Use --write flag to enable write mode",
 		})
+		return
 	}
 
 	// Get parameters
 	sources := c.Query("srcs")
 	action := c.Query("action")
-	dest := c.Query("dest", "")
+	dest := c.DefaultQuery("dest", "")
 
 	// Special handling for new_folder action
 	if action == "new_folder" {
 		folderName := c.Query("name")
 		if folderName == "" {
-			return c.Status(400).JSON(fiber.Map{
+			c.JSON(400, gin.H{
 				"status": "error",
 				"error":  "Missing required parameter: name",
 			})
+			return
 		}
 
 		// Validate folder name doesn't contain path separators
 		if strings.Contains(folderName, "/") || strings.Contains(folderName, "\\") {
-			return c.Status(400).JSON(fiber.Map{
+			c.JSON(400, gin.H{
 				"status": "error",
 				"error":  "Folder name cannot contain path separators",
 			})
+			return
 		}
 
 		// Build full path for new folder
-		destPath := filepath.Join(rootPath, dest)
+		destPath, err := safePath(rootPath, dest)
+		if err != nil {
+			c.JSON(403, gin.H{
+				"status": "error",
+				"error":  "Access denied",
+			})
+			return
+		}
 		newFolderPath := filepath.Join(destPath, folderName)
 
 		// Check if folder already exists
 		if _, err := os.Stat(newFolderPath); err == nil {
-			return c.Status(400).JSON(fiber.Map{
+			c.JSON(400, gin.H{
 				"status": "error",
 				"error":  "A file or folder with that name already exists",
 			})
+			return
 		}
 
 		// Create the folder
 		if err := os.Mkdir(newFolderPath, 0755); err != nil {
 			log.Printf("Error creating folder %s: %v", newFolderPath, err)
-			return c.Status(500).JSON(fiber.Map{
+			c.JSON(500, gin.H{
 				"status": "error",
 				"error":  fmt.Sprintf("Failed to create folder: %v", err),
 			})
+			return
 		}
 
 		// Update size tree if enabled
@@ -192,56 +218,67 @@ func handleManage(c *fiber.Ctx) error {
 		// Log the operation
 		logModification("new_folder", nil, filepath.Join(dest, folderName), nil)
 
-		return c.JSON(fiber.Map{
+		c.JSON(200, gin.H{
 			"status": "ok",
 		})
+		return
 	}
 
 	if sources == "" || action == "" {
-		return c.Status(400).JSON(fiber.Map{
+		c.JSON(400, gin.H{
 			"status": "error",
 			"error":  "Missing required parameters: srcs and action",
 		})
+		return
 	}
 
 	// Parse sources (they come as multiple values with same key)
-	query := string(c.Request().URI().QueryString())
-	values, _ := url.ParseQuery(query)
-	srcList := values["srcs"] // This returns []string
+	srcList := c.QueryArray("srcs")
 	if len(srcList) == 0 {
-		return c.Status(400).JSON(fiber.Map{
+		c.JSON(400, gin.H{
 			"status": "error",
 			"error":  "No source files provided",
 		})
+		return
 	}
 
 	// Validate action
 	if action != "copy" && action != "paste" && action != "delete" {
-		return c.Status(400).JSON(fiber.Map{
+		c.JSON(400, gin.H{
 			"status": "error",
 			"error":  "Invalid action. Must be 'copy' or 'paste'",
 		})
+		return
 	}
 
 	// Build destination path
 	if action != "delete" {
 		// Build destination path
-		destPath := filepath.Join(rootPath, dest)
+		destPath, pathErr := safePath(rootPath, dest)
+		if pathErr != nil {
+			c.JSON(403, gin.H{
+				"status": "error",
+				"error":  "Access denied",
+			})
+			return
+		}
 
 		// Check if destination exists and is a directory
 		destInfo, err := os.Stat(destPath)
 		if err != nil {
-			return c.Status(400).JSON(fiber.Map{
+			c.JSON(400, gin.H{
 				"status": "error",
 				"error":  "Destination path does not exist",
 			})
+			return
 		}
 
 		if !destInfo.IsDir() {
-			return c.Status(400).JSON(fiber.Map{
+			c.JSON(400, gin.H{
 				"status": "error",
 				"error":  "Destination must be a directory",
 			})
+			return
 		}
 	}
 
@@ -249,7 +286,11 @@ func handleManage(c *fiber.Ctx) error {
 
 	// Process each source file
 	for _, src := range srcList {
-		srcPath := filepath.Join(rootPath, src)
+		srcPath, pathErr := safePath(rootPath, src)
+		if pathErr != nil {
+			errors = append(errors, fmt.Sprintf("Access denied for path: %s", src))
+			continue
+		}
 
 		// Check if source exists
 		srcInfo, err := os.Stat(srcPath)
@@ -304,7 +345,7 @@ func handleManage(c *fiber.Ctx) error {
 			}
 		} else {
 			// Handle copy/paste operations (existing code)
-			destPath := filepath.Join(rootPath, dest)
+			destPath, _ := safePath(rootPath, dest)
 			baseName := filepath.Base(srcPath)
 			targetPath := filepath.Join(destPath, baseName)
 
@@ -381,7 +422,7 @@ func handleManage(c *fiber.Ctx) error {
 
 							// Add to parent
 							parent.Children = append(parent.Children, newNode)
-							parent.UpdateParentSizes(sizeToAdd)
+							newNode.UpdateParentSizes(sizeToAdd)
 
 							// Update BoltDB
 							if boltDB != nil {
@@ -505,13 +546,14 @@ func handleManage(c *fiber.Ctx) error {
 
 	// Return response
 	if len(errors) > 0 {
-		return c.JSON(fiber.Map{
+		c.JSON(200, gin.H{
 			"status": "error",
 			"error":  strings.Join(errors, "; "),
 		})
+		return
 	}
 
-	return c.JSON(fiber.Map{
+	c.JSON(200, gin.H{
 		"status": "ok",
 	})
 }
@@ -537,42 +579,51 @@ type WSRequest struct {
 	Dir       string `json:"dir"`
 }
 
-func handleDocument(c *fiber.Ctx) error {
+func handleDocument(c *gin.Context) {
 	// Check if office docs are enabled
 	if libreOfficeAppPath == "" {
-		return c.Status(503).SendString("Office document viewing is not enabled.")
+		c.String(503, "Office document viewing is not enabled.")
+		return
 	}
 
 	// Get document path from query parameter and decode it
 	encodedDocPath := c.Query("path")
 	if encodedDocPath == "" {
-		return c.Status(400).SendString("Document path is required")
+		c.String(400, "Document path is required")
+		return
 	}
 
 	// Decode the URL-encoded path
 	decodedDocPath, err := url.QueryUnescape(encodedDocPath)
 	if err != nil {
-		return c.Status(400).SendString("Invalid document path encoding")
+		c.String(400, "Invalid document path encoding")
+		return
 	}
 
 	// Concatenate with root path to get full file path
-	fullDocPath := filepath.Join(rootPath, decodedDocPath)
+	fullDocPath, err := safePath(rootPath, decodedDocPath)
+	if err != nil {
+		c.String(403, "Access denied")
+		return
+	}
 
 	// Check if file exists
 	if _, err := os.Stat(fullDocPath); os.IsNotExist(err) {
-		return c.Status(404).SendString("File not found: " + decodedDocPath)
+		c.String(404, "File not found: "+decodedDocPath)
+		return
 	}
 
-	// Parse the template from file
-	tmpl, err := template.ParseFiles("doc_viewer.html.tmpl")
-	if err != nil {
-		return c.Status(500).SendString("Template error: " + err.Error())
+	// Check that template was loaded
+	if docViewerTemplate == nil {
+		c.String(500, "Document viewer template not loaded")
+		return
 	}
 
 	// Convert document to HTML using LibreOffice
 	htmlContent, err := convertDocumentToHTML(fullDocPath)
 	if err != nil {
-		return c.Status(500).SendString("Document conversion failed: " + err.Error())
+		c.String(500, "Document conversion failed: "+err.Error())
+		return
 	}
 
 	// Prepare template data
@@ -583,8 +634,8 @@ func handleDocument(c *fiber.Ctx) error {
 	}
 
 	// Execute the template
-	c.Set("Content-Type", "text/html")
-	return tmpl.Execute(c.Response().BodyWriter(), data)
+	c.Header("Content-Type", "text/html")
+	docViewerTemplate.Execute(c.Writer, data)
 }
 
 func convertDocumentToHTML(docPath string) (string, error) {
@@ -657,7 +708,7 @@ var (
 	gitCommit = "unknown"     // Will be set during build
 )
 
-func setupTusUpload(app *fiber.App) {
+func setupTusUpload(router *gin.Engine) {
 	if !writeMode {
 		log.Println("Upload disabled: not in write mode")
 		return
@@ -721,26 +772,59 @@ func setupTusUpload(app *fiber.App) {
 
 				log.Printf("Upload completed - ID: %s, Filename: %s, TargetPath: %s", event.Upload.ID, filename, targetPath)
 
+				finalPath, pathErr := safePath(rootPath, filepath.Join(targetPath, filename))
+				if pathErr != nil {
+					log.Printf("Upload rejected - path escapes root: %s/%s", targetPath, filename)
+					return
+				}
 				tempFile := filepath.Join(uploadsDir, event.Upload.ID)
-				finalPath := filepath.Join(rootPath, targetPath, filename)
 				log.Printf("Moving from %s to %s", tempFile, finalPath)
 
 				os.MkdirAll(filepath.Dir(finalPath), 0755)
 				move(tempFile, finalPath)
 				log.Printf("Successfully moved uploaded file to %s", finalPath)
+
+				// Update size tree after successful upload
+				if withSizes && sizeTreeRoot != nil {
+					fileInfo, statErr := os.Stat(finalPath)
+					if statErr == nil {
+						sizeTreeMutex.Lock()
+						parentPath := filepath.Dir(finalPath)
+						if parent := sizeTreeRoot.FindByPath(parentPath); parent != nil {
+							newNode := &scan.FileData{
+								ID:         uuid.New().String(),
+								Name:       fileInfo.Name(),
+								Parent:     parent,
+								IsDir:      false,
+								CachedSize: fileInfo.Size(),
+							}
+							parent.Children = append(parent.Children, newNode)
+							newNode.UpdateParentSizes(fileInfo.Size())
+
+							if boltDB != nil {
+								updateNodeInBolt(boltDB, newNode)
+								for p := parent; p != nil; p = p.Parent {
+									updateNodeInBolt(boltDB, p)
+								}
+							}
+						}
+						sizeTreeMutex.Unlock()
+					}
+				}
 			}()
 		}
 	}()
 
-	// Mount using the bridge pattern - no manual conversion needed!
+	// Mount TUS handlers directly - no adaptor needed with Gin (net/http native)
 	prefix := "/upload/tus/"
-	group := app.Group(prefix, adaptor.HTTPMiddleware(tusHandler.Middleware))
+	tusGroup := router.Group(prefix)
+	tusGroup.Use(gin.WrapH(tusHandler.Middleware(http.NotFoundHandler())))
 
-	group.Post("", adaptor.HTTPHandlerFunc(tusHandler.PostFile))
-	group.Head(":id", adaptor.HTTPHandlerFunc(tusHandler.HeadFile))
-	group.Patch(":id", adaptor.HTTPHandlerFunc(tusHandler.PatchFile))
-	group.Get(":id", adaptor.HTTPHandlerFunc(tusHandler.GetFile))
-	group.Delete(":id", adaptor.HTTPHandlerFunc(tusHandler.DelFile))
+	tusGroup.POST("", gin.WrapF(tusHandler.PostFile))
+	tusGroup.HEAD(":id", gin.WrapF(tusHandler.HeadFile))
+	tusGroup.PATCH(":id", gin.WrapF(tusHandler.PatchFile))
+	tusGroup.GET(":id", gin.WrapF(tusHandler.GetFile))
+	tusGroup.DELETE(":id", gin.WrapF(tusHandler.DelFile))
 }
 
 // loadSizeTree loads the size tree from a JSON file
@@ -1082,76 +1166,88 @@ func main() {
 		}
 	}
 
-	// Create Fiber app
-	app := fiber.New(fiber.Config{
-		ErrorHandler: func(c *fiber.Ctx, err error) error {
-			log.Printf("Error: %v", err)
-			return c.Status(500).SendString("Internal Server Error")
-		},
-	})
+	// Parse templates once at startup
+	var tmplErr error
+	indexTemplate, tmplErr = template.ParseFiles("./index.html.tmpl")
+	if tmplErr != nil {
+		log.Printf("Warning: Failed to parse index template: %v", tmplErr)
+	}
+	docViewerTemplate, tmplErr = template.ParseFiles("./doc_viewer.html.tmpl")
+	if tmplErr != nil {
+		log.Printf("Warning: Failed to parse doc_viewer template: %v", tmplErr)
+	}
+
+	// Create Gin router
+	router := gin.Default()
 
 	// Enable CORS
-	app.Use(cors.New())
+	router.Use(cors.Default())
 
 	// Serve static files from ./static directory
-	app.Static("/static", "./static")
+	router.Static("/static", "./static")
 
 	// Your existing server setup code here...
-	app.Get("/doc_viewer", handleDocument)
+	router.GET("/doc_viewer", handleDocument)
 
 	// Serve the main HTML file at root
-	app.Get("/", func(c *fiber.Ctx) error {
-		tmpl, err := template.ParseFiles("./index.html.tmpl")
-		if err != nil {
-			return c.Status(500).SendString("Template error: " + err.Error())
+	router.GET("/", func(c *gin.Context) {
+		if indexTemplate == nil {
+			c.String(500, "Index template not loaded")
+			return
 		}
 
 		data := IndexData{
-			WriteMode: writeMode, // Pass writeMode
+			WriteMode: writeMode,
 			RootPath:  rootPath,
 		}
 
-		c.Set("Content-Type", "text/html")
-		return tmpl.Execute(c.Response().BodyWriter(), data)
+		c.Header("Content-Type", "text/html")
+		indexTemplate.Execute(c.Writer, data)
 	})
 
 	// Image streaming route - now uses query parameter
-	app.Get("/image", handleImageStream)
+	router.GET("/image", handleImageStream)
 
 	// File streaming route - now uses query parameter
-	app.Get("/file", handleFileStream)
+	router.GET("/file", handleFileStream)
 
 	// Zip download route - streams folder as zip
-	app.Get("/zip", handleZipDownload)
+	router.GET("/zip", handleZipDownload)
 
 	// Rename route - renames file or folder
-	app.Post("/rename", handleRename)
+	router.POST("/rename", handleRename)
 
 	//
-	app.Get("/manage", handleManage)
+	router.GET("/manage", handleManage)
 
-	// WebSocket upgrade middleware
-	app.Use("/files", func(c *fiber.Ctx) error {
-		if websocket.IsWebSocketUpgrade(c) {
-			c.Locals("allowed", true)
-			return c.Next()
+	setupTusUpload(router)
+
+	// WebSocket handler with gorilla upgrader
+	var wsUpgrader = gorillaWs.Upgrader{
+		CheckOrigin: func(r *http.Request) bool { return true },
+	}
+	router.GET("/files", func(c *gin.Context) {
+		conn, err := wsUpgrader.Upgrade(c.Writer, c.Request, nil)
+		if err != nil {
+			log.Printf("WebSocket upgrade failed: %v", err)
+			return
 		}
-		return fiber.ErrUpgradeRequired
+		handleWebSocket(conn)
 	})
-
-	setupTusUpload(app)
-	// WebSocket handler
-	app.Get("/files", websocket.New(handleWebSocket))
 
 	// Setup signal handler for graceful shutdown
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
 
 	// Start server in goroutine
+	srv := &http.Server{
+		Addr:    ":" + port,
+		Handler: router,
+	}
 	go func() {
 		log.Printf("Server starting on :%s\n", port)
 		log.Println("Static files served from: ./static")
-		if err := app.Listen(":" + port); err != nil {
+		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.Printf("Server error: %v", err)
 		}
 	}()
@@ -1159,6 +1255,13 @@ func main() {
 	// Block on signal channel
 	<-sigChan
 	log.Println("\nReceived interrupt signal, waiting for in-progress operations...")
+
+	// Gracefully shut down the HTTP server
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := srv.Shutdown(ctx); err != nil {
+		log.Printf("Server shutdown error: %v", err)
+	}
 
 	// Wait for all file operations to complete
 	fileOpsInProgress.Wait()
@@ -1195,135 +1298,160 @@ func main() {
 	os.Exit(0)
 }
 
-func handleImageStream(c *fiber.Ctx) error {
+func handleImageStream(c *gin.Context) {
 	// Get the path from query parameter
 	relativePath := c.Query("path")
 	if relativePath == "" {
-		return c.Status(400).SendString("Path parameter required")
+		c.String(400, "Path parameter required")
+		return
 	}
 
 	// Explicitly URL decode the path
 	decodedPath, err := url.QueryUnescape(relativePath)
 	if err != nil {
 		log.Printf("Error decoding path: %v", err)
-		return c.Status(400).SendString("Invalid path encoding")
+		c.String(400, "Invalid path encoding")
+		return
 	}
 
 	log.Printf("Image request for path: %s", decodedPath)
 
 	// Construct full path using decoded path
-	fullPath := filepath.Join(rootPath, decodedPath)
+	fullPath, err := safePath(rootPath, decodedPath)
+	if err != nil {
+		c.String(403, "Access denied")
+		return
+	}
 
 	// Check if file exists
 	info, err := os.Stat(fullPath)
 	if err != nil {
 		log.Printf("Image file does not exist: %s", fullPath)
-		return c.Status(404).SendString("Image not found")
+		c.String(404, "Image not found")
+		return
 	}
 
 	// Check if it's a file (not directory)
 	if info.IsDir() {
-		return c.Status(400).SendString("Path is a directory, not a file")
+		c.String(400, "Path is a directory, not a file")
+		return
 	}
 
 	// Check if it's an image file
 	ext := strings.ToLower(filepath.Ext(fullPath))
 	if !isImageFile(ext) {
-		return c.Status(400).SendString("File is not a supported image format")
+		c.String(400, "File is not a supported image format")
+		return
 	}
 
 	// Set appropriate content type
 	contentType := getImageContentType(ext)
-	c.Set("Content-Type", contentType)
+	c.Header("Content-Type", contentType)
 
 	// Stream the file
-	return c.SendFile(fullPath)
+	c.File(fullPath)
 }
 
-func handleFileStream(c *fiber.Ctx) error {
+func handleFileStream(c *gin.Context) {
 	// Get the path from query parameter
 	relativePath := c.Query("path")
 	if relativePath == "" {
-		return c.Status(400).SendString("Path parameter required")
+		c.String(400, "Path parameter required")
+		return
 	}
 
 	// Explicitly URL decode the path
 	decodedPath, err := url.QueryUnescape(relativePath)
 	if err != nil {
 		log.Printf("Error decoding path: %v", err)
-		return c.Status(400).SendString("Invalid path encoding")
+		c.String(400, "Invalid path encoding")
+		return
 	}
 
 	log.Printf("File request for path: %s", decodedPath)
 
 	// Construct full path using decoded path
-	fullPath := filepath.Join(rootPath, decodedPath)
+	fullPath, err := safePath(rootPath, decodedPath)
+	if err != nil {
+		c.String(403, "Access denied")
+		return
+	}
 
 	// Check if file exists
 	info, err := os.Stat(fullPath)
 	if err != nil {
 		log.Printf("File does not exist: %s", fullPath)
-		return c.Status(404).SendString("File not found")
+		c.String(404, "File not found")
+		return
 	}
 
 	// Check if it's a file (not directory)
 	if info.IsDir() {
-		return c.Status(400).SendString("Path is a directory, not a file")
+		c.String(400, "Path is a directory, not a file")
+		return
 	}
 
 	// Set appropriate content type
 	ext := strings.ToLower(filepath.Ext(fullPath))
 	contentType := getFileContentType(ext)
-	c.Set("Content-Type", contentType)
+	c.Header("Content-Type", contentType)
 
 	// Set Content-Disposition header for documents to suggest download
 	if isDocumentFile(ext) {
 		filename := filepath.Base(fullPath)
-		c.Set("Content-Disposition", "inline; filename=\""+filename+"\"")
+		c.Header("Content-Disposition", "inline; filename=\""+filename+"\"")
 	}
 
 	// Stream the file
-	return c.SendFile(fullPath)
+	c.File(fullPath)
 }
 
-func handleZipDownload(c *fiber.Ctx) error {
+func handleZipDownload(c *gin.Context) {
 	// Get the path from query parameter
 	relativePath := c.Query("path")
 	if relativePath == "" {
-		return c.Status(400).SendString("Path parameter required")
+		c.String(400, "Path parameter required")
+		return
 	}
 
 	// Explicitly URL decode the path
 	decodedPath, err := url.QueryUnescape(relativePath)
 	if err != nil {
 		log.Printf("Error decoding path: %v", err)
-		return c.Status(400).SendString("Invalid path encoding")
+		c.String(400, "Invalid path encoding")
+		return
 	}
 
 	log.Printf("Zip download request for path: %s", decodedPath)
 
 	// Construct full path using decoded path
-	fullPath := filepath.Join(rootPath, decodedPath)
+	fullPath, err := safePath(rootPath, decodedPath)
+	if err != nil {
+		c.String(403, "Access denied")
+		return
+	}
 
 	// Check if path exists
 	info, err := os.Stat(fullPath)
 	if err != nil {
 		log.Printf("Path does not exist: %s", fullPath)
-		return c.Status(404).SendString("Path not found")
+		c.String(404, "Path not found")
+		return
 	}
 
 	// Check if it's a directory
 	if !info.IsDir() {
-		return c.Status(400).SendString("Path must be a directory")
+		c.String(400, "Path must be a directory")
+		return
 	}
 
 	// Set headers for zip download
 	zipName := filepath.Base(fullPath) + ".zip"
-	c.Set("Content-Type", "application/zip")
-	c.Set("Content-Disposition", "attachment; filename=\""+zipName+"\"")
+	c.Header("Content-Type", "application/zip")
+	c.Header("Content-Disposition", "attachment; filename=\""+zipName+"\"")
 
 	// Create zip writer that writes directly to response
-	zipWriter := zip.NewWriter(c.Response().BodyWriter())
+	zipWriter := zip.NewWriter(c.Writer)
 	defer zipWriter.Close()
 
 	// Walk the directory and add files to zip
@@ -1392,17 +1520,25 @@ func handleZipDownload(c *fiber.Ctx) error {
 
 	if err != nil {
 		log.Printf("Error creating zip: %v", err)
-		return c.Status(500).SendString("Failed to create zip archive")
+		// Headers already sent, cannot change status code
+		return
 	}
 
 	log.Printf("Successfully created zip for: %s", decodedPath)
-	return nil
 }
 
-func handleRename(c *fiber.Ctx) error {
+func handleRename(c *gin.Context) {
 	// Track this operation for graceful shutdown
 	fileOpsInProgress.Add(1)
 	defer fileOpsInProgress.Done()
+
+	if !writeMode {
+		c.JSON(403, gin.H{
+			"status": "error",
+			"error":  "File operations are disabled. Use --write flag to enable write mode",
+		})
+		return
+	}
 
 	// Parse JSON body
 	var req struct {
@@ -1410,57 +1546,70 @@ func handleRename(c *fiber.Ctx) error {
 		NewName string `json:"newName"`
 	}
 
-	if err := c.BodyParser(&req); err != nil {
-		return c.Status(400).JSON(fiber.Map{
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(400, gin.H{
 			"status": "error",
 			"error":  "Invalid request body",
 		})
+		return
 	}
 
 	// Validate inputs
 	if req.Path == "" || req.NewName == "" {
-		return c.Status(400).JSON(fiber.Map{
+		c.JSON(400, gin.H{
 			"status": "error",
 			"error":  "Path and newName are required",
 		})
+		return
 	}
 
 	// Ensure newName doesn't contain path separators
 	if strings.Contains(req.NewName, "/") || strings.Contains(req.NewName, "\\") {
-		return c.Status(400).JSON(fiber.Map{
+		c.JSON(400, gin.H{
 			"status": "error",
 			"error":  "New name cannot contain path separators",
 		})
+		return
 	}
 
 	// Build old and new paths
-	oldPath := filepath.Join(rootPath, req.Path)
+	oldPath, err := safePath(rootPath, req.Path)
+	if err != nil {
+		c.JSON(403, gin.H{
+			"status": "error",
+			"error":  "Access denied",
+		})
+		return
+	}
 	dirPath := filepath.Dir(oldPath)
 	newPath := filepath.Join(dirPath, req.NewName)
 
 	// Check if old path exists
 	if _, err := os.Stat(oldPath); err != nil {
-		return c.Status(404).JSON(fiber.Map{
+		c.JSON(404, gin.H{
 			"status": "error",
 			"error":  "File or folder not found",
 		})
+		return
 	}
 
 	// Check if new path already exists
 	if _, err := os.Stat(newPath); err == nil {
-		return c.Status(400).JSON(fiber.Map{
+		c.JSON(400, gin.H{
 			"status": "error",
 			"error":  "A file or folder with that name already exists",
 		})
+		return
 	}
 
 	// Perform rename
 	if err := os.Rename(oldPath, newPath); err != nil {
 		log.Printf("Error renaming %s to %s: %v", oldPath, newPath, err)
-		return c.Status(500).JSON(fiber.Map{
+		c.JSON(500, gin.H{
 			"status": "error",
 			"error":  fmt.Sprintf("Failed to rename: %v", err),
 		})
+		return
 	}
 
 	// Update size tree after successful rename
@@ -1469,14 +1618,6 @@ func handleRename(c *fiber.Ctx) error {
 		if node := sizeTreeRoot.FindByPath(oldPath); node != nil {
 			// Update Name field
 			node.Name = req.NewName
-			// Path is dynamic, so node.Path() will now return newPath automatically.
-
-			// Update bolt database:
-			// ID is constant. Just save the node with new name.
-			// ALSO need to save the PARENT because it contains the list of child IDs (which hasn't changed),
-			// BUT if we store Name in Parent's child list (we don't, we store IDs), then parent update might not be needed?
-			// scan/storage.go `StoredFileData` has `ChildIDs`. It doesn't duplicate names there.
-			// So technically only the Node needs update in DB.
 
 			if boltDB != nil {
 				if err := updateNodeInBolt(boltDB, node); err != nil {
@@ -1492,7 +1633,7 @@ func handleRename(c *fiber.Ctx) error {
 	// Return new path relative to root
 	newRelativePath := filepath.Join(filepath.Dir(req.Path), req.NewName)
 
-	return c.JSON(fiber.Map{
+	c.JSON(200, gin.H{
 		"status":  "success",
 		"newPath": newRelativePath,
 		"newName": req.NewName,
@@ -1577,15 +1718,15 @@ func getFileType(entry os.DirEntry) string {
 	return "file"
 }
 
-func handleWebSocket(c *websocket.Conn) {
-	defer c.Close()
+func handleWebSocket(conn *gorillaWs.Conn) {
+	defer conn.Close()
 
 	log.Println("WebSocket connected")
 
 	// Listen for path requests from client
 	for {
 		var req WSRequest
-		if err := c.ReadJSON(&req); err != nil {
+		if err := conn.ReadJSON(&req); err != nil {
 			log.Printf("WebSocket read error: %v", err)
 			return
 		}
@@ -1610,7 +1751,7 @@ func handleWebSocket(c *websocket.Conn) {
 				Items:     chunk,
 			}
 
-			if err := c.WriteJSON(msg); err != nil {
+			if err := conn.WriteJSON(msg); err != nil {
 				log.Printf("Error sending chunk: %v", err)
 				return
 			}
@@ -1621,7 +1762,7 @@ func handleWebSocket(c *websocket.Conn) {
 			RequestID: requestID,
 			Items:     []FileItem{},
 		}
-		if err := c.WriteJSON(completionMsg); err != nil {
+		if err := conn.WriteJSON(completionMsg); err != nil {
 			log.Printf("Error sending completion signal: %v", err)
 			return
 		}
@@ -1633,8 +1774,12 @@ func handleWebSocket(c *websocket.Conn) {
 // Extract directory listing logic into separate function
 func getDirectoryListing(relativePath, sortBy, dir string) []FileItem {
 
-	// Simply concatenate rootPath with relativePath
-	fullPath := filepath.Join(rootPath, relativePath)
+	// Safely resolve the path
+	fullPath, err := safePath(rootPath, relativePath)
+	if err != nil {
+		log.Printf("Path traversal attempt blocked: %s", relativePath)
+		return []FileItem{}
+	}
 
 	// Check if path exists
 	info, err := os.Stat(fullPath)
