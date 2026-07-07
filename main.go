@@ -209,6 +209,10 @@ func handleManage(c *gin.Context) {
 					if err != nil {
 						log.Printf("Warning: Failed to update bolt db for new folder: %v", err)
 					}
+					err = updateNodeInBolt(boltDB, parent)
+					if err != nil {
+						log.Printf("Warning: Failed to update bolt db for parent after new folder: %v", err)
+					}
 				}
 			}
 			sizeTreeMutex.Unlock()
@@ -315,6 +319,9 @@ func handleManage(c *gin.Context) {
 				sizeTreeMutex.RUnlock()
 			}
 
+			// TOCTOU: node lookup (RLock) and tree mutation (Lock) are separate critical sections.
+			// If another request moves/renames this node during the gap, we operate on stale data.
+			// Acceptable for single-user; fix by holding Lock for the entire block if needed.
 			// Delete from filesystem (no lock held during I/O)
 			err = os.RemoveAll(srcPath) // RemoveAll works for both files and directories
 			if err != nil {
